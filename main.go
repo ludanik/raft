@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
@@ -27,12 +28,20 @@ type PersistentState struct {
 	votedFor    string
 }
 
+// load persistent state
 func LoadState() (*PersistentState, error) {
 	file, err := os.ReadFile("log")
 	if err != nil {
 		// probably because it doesnt exist
-		// return nil and create it when u save log
-		return nil, err
+		// return empty persistentState and
+		// and save it when u save log
+		entries := make([]LogEntry, 0)
+
+		return &PersistentState{
+			log:         entries,
+			currentTerm: 0,
+			votedFor:    "",
+		}, nil
 	}
 
 	// first line is (currentTerm, votedFor)
@@ -74,7 +83,40 @@ func LoadState() (*PersistentState, error) {
 
 // only need to save log, currentTerm, votedFor
 func SaveState(state *State) error {
+	// just overwrite file for now
+	currentTerm := state.persistentState.currentTerm
+	votedFor := state.persistentState.votedFor
+	log := state.persistentState.log
 
+	line1 := fmt.Sprintf("%d,%s\n", currentTerm, votedFor)
+
+	file, err := os.Create("log")
+	if err != nil {
+		return err
+	}
+
+	w := bufio.NewWriter(file)
+	_, err = w.WriteString(line1)
+	if err != nil {
+		return err
+	}
+
+	var str string
+	for idx, entry := range log {
+		if idx == len(log)-1 {
+			str = fmt.Sprintf("%d,%s", entry.term, entry.command)
+		} else {
+			str = fmt.Sprintf("%d,%s\n", entry.term, entry.command)
+		}
+		_, err = w.WriteString(str)
+	}
+
+	err = w.Flush()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 type LeaderState struct {
@@ -89,6 +131,9 @@ type State struct {
 	commitIndex int
 	lastApplied int
 	role        Role
+}
+
+type Server struct {
 }
 
 func InitState() (*State, error) {
@@ -112,4 +157,6 @@ func main() {
 		fmt.Println(err)
 	}
 	fmt.Println(state.persistentState.log)
+	err = SaveState(state)
+	fmt.Print(err)
 }
