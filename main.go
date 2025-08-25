@@ -8,10 +8,10 @@ import (
 )
 
 // make the log first ezpz
-type ServerState int
+type Role int
 
 const (
-	FOLLOWER ServerState = iota
+	FOLLOWER Role = iota
 	CANDIDATE
 	LEADER
 )
@@ -21,18 +21,18 @@ type LogEntry struct {
 	command string
 }
 
-type PersistentConfig struct {
+type PersistentState struct {
 	log         []LogEntry
 	currentTerm int
 	votedFor    string
 }
 
-func LoadPersistentConfig() (PersistentConfig, error) {
+func LoadState() (*PersistentState, error) {
 	file, err := os.ReadFile("log")
 	if err != nil {
 		// probably because it doesnt exist
 		// return nil and create it when u save log
-		return PersistentConfig{}, err
+		return nil, err
 	}
 
 	// first line is (currentTerm, votedFor)
@@ -43,7 +43,7 @@ func LoadPersistentConfig() (PersistentConfig, error) {
 	valLine := strings.Split(lines[0], ",")
 	currentTerm, err := strconv.Atoi(valLine[0])
 	if err != nil {
-		return PersistentConfig{}, err
+		return nil, err
 	}
 
 	votedFor := valLine[1]
@@ -58,58 +58,58 @@ func LoadPersistentConfig() (PersistentConfig, error) {
 		splitLine := strings.Split(lines[idx], ",")
 		term, err := strconv.Atoi(splitLine[0])
 		if err != nil {
-			return PersistentConfig{}, err
+			return nil, err
 		}
 
 		entry := LogEntry{term, splitLine[1]}
 		entries[idx-1] = entry
 	}
 
-	return PersistentConfig{
+	return &PersistentState{
 		log:         entries,
 		currentTerm: currentTerm,
 		votedFor:    votedFor,
 	}, nil
 }
 
-type LeaderConfig struct {
+// only need to save log, currentTerm, votedFor
+func SaveState(state *State) error {
+
+}
+
+type LeaderState struct {
 	nextIndex  int
 	matchIndex int
 }
 
-type Config struct {
-	persistentCfg PersistentConfig
-	leaderCfg     LeaderConfig
+type State struct {
+	persistentState *PersistentState
+	leaderState     LeaderState
 
 	commitIndex int
 	lastApplied int
-	state       ServerState
+	role        Role
 }
 
-func NewConfig() (Config, error) {
-	pCfg, err := LoadPersistentConfig()
+func InitState() (*State, error) {
+	pState, err := LoadState()
 	if err != nil {
-		return Config{}, err
+		return nil, err
 	}
 
-	leaderCfg := LeaderConfig{0, 0}
+	lState := LeaderState{0, 0}
 
-	return Config{
-		persistentCfg: pCfg,
-		leaderCfg:     leaderCfg,
-		state:         FOLLOWER,
+	return &State{
+		persistentState: pState,
+		leaderState:     lState,
+		role:            FOLLOWER,
 	}, nil
 }
 
-// only need to save log, currentTerm, votedFor
-func SaveConfig() error {
-	return nil
-}
-
 func main() {
-	config, err := NewConfig()
+	state, err := InitState()
 	if err != nil {
 		fmt.Println(err)
 	}
-	fmt.Println(config.persistentCfg.log)
+	fmt.Println(state.persistentState.log)
 }
