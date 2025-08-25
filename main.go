@@ -133,9 +133,6 @@ type State struct {
 	role        Role
 }
 
-type Server struct {
-}
-
 func InitState() (*State, error) {
 	pState, err := LoadState()
 	if err != nil {
@@ -151,7 +148,15 @@ func InitState() (*State, error) {
 	}, nil
 }
 
+type Server struct {
+}
+
 func main() {
+	// instead of implementing discovery,
+	// just have list of machines for now?
+	machines := make([]string, 5)
+	machines[0] = "localhost:5001"
+
 	state, err := InitState()
 	if err != nil {
 		fmt.Println(err)

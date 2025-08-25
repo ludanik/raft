@@ -41,7 +41,7 @@ Persist currentTerm, votedFor, log[] on machine
 
 ## RPC
 
-Use gRPC, probably easiest way
+Use gRPC, probably easiest way. Servers should know all other servers somehow. Then we can easily do the election and all these things.r
 
 ### RequestVote RPC
 ### AppendEntries RPC
