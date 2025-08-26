@@ -2,11 +2,15 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"strings"
+
+	"google.golang.org/grpc"
 )
 
 // make the log first ezpz
@@ -150,7 +154,36 @@ func InitState() (*State, error) {
 }
 
 type Node struct {
-	state *State
+	state   *State
+	cluster map[int]string
+	nodeId  int
+}
+
+func NewNode(cluster map[int]string, id int) (*Node, error) {
+	state, err := InitState()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Node{
+		state:   state,
+		cluster: cluster,
+		nodeId:  id,
+	}, nil
+}
+
+type Server struct {
+	UnimplementedRaftServiceServer
+}
+
+// this is for receiving RequestVote from another candidate node
+func (s *Server) RequestVote(context.Context, *RequestVoteMessage) (*RequestVoteReply, error) {
+	return &RequestVoteReply{}, nil
+}
+
+// this is for receiving AppendEntries from a leader node
+func (s *Server) AppendEntries(context.Context, *AppendEntriesMessage) (*AppendEntriesReply, error) {
+	return &AppendEntriesReply{}, nil
 }
 
 func main() {
@@ -172,14 +205,18 @@ func main() {
 		cluster[nodeId] = splitNode[1]
 	}
 
-	fmt.Println(cluster)
-	fmt.Println("node", *nodePtr)
-
-	state, err := InitState()
+	node, err := NewNode(cluster, *nodePtr)
 	if err != nil {
-		fmt.Println(err)
+		panic("unable to start node")
 	}
-	fmt.Println(state.persistentState.log)
-	err = SaveState(state)
-	fmt.Print(err)
+
+	lis, err := net.Listen("tcp", ":9001")
+
+	if err != nil {
+		panic(err)
+	}
+
+	grpcServer := grpc.NewServer()
+	pb.Register
+
 }

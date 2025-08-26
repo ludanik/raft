@@ -358,7 +358,7 @@ const file_raft_proto_rawDesc = "" +
 	"\acommand\x18\x02 \x01(\tR\acommand2\x95\x01\n" +
 	"\vRaftService\x12?\n" +
 	"\vRequestVote\x12\x18.main.RequestVoteMessage\x1a\x16.main.RequestVoteReply\x12E\n" +
-	"\rAppendEntries\x12\x1a.main.AppendEntriesMessage\x1a\x18.main.AppendEntriesReplyB\x1eZ\x1cgithub.com/ludanik/raft;mainb\x06proto3"
+	"\rAppendEntries\x12\x1a.main.AppendEntriesMessage\x1a\x18.main.AppendEntriesReplyB\bZ\x06.;mainb\x06proto3"
 
 var (
 	file_raft_proto_rawDescOnce sync.Once
