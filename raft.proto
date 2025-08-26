@@ -26,7 +26,7 @@ message AppendEntriesMessage {
     int32 prevLogIndex = 3;
 
     int32 prevLogTerm = 4;
-    repeated LogEntry entries = 5;
+    repeated LogEntryMessage entries = 5;
     int32 commitIndex = 6;
 }
 
@@ -35,7 +35,7 @@ message AppendEntriesReply {
     bool success = 2;
 }
 
-message LogEntry {
+message LogEntryMessage {
     int32 term = 1;
     string command = 2;
 }

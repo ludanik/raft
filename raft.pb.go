@@ -147,7 +147,7 @@ type AppendEntriesMessage struct {
 	LeaderId      int32                  `protobuf:"varint,2,opt,name=leaderId,proto3" json:"leaderId,omitempty"`
 	PrevLogIndex  int32                  `protobuf:"varint,3,opt,name=prevLogIndex,proto3" json:"prevLogIndex,omitempty"`
 	PrevLogTerm   int32                  `protobuf:"varint,4,opt,name=prevLogTerm,proto3" json:"prevLogTerm,omitempty"`
-	Entries       []*LogEntry            `protobuf:"bytes,5,rep,name=entries,proto3" json:"entries,omitempty"`
+	Entries       []*LogEntryMessage     `protobuf:"bytes,5,rep,name=entries,proto3" json:"entries,omitempty"`
 	CommitIndex   int32                  `protobuf:"varint,6,opt,name=commitIndex,proto3" json:"commitIndex,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -211,7 +211,7 @@ func (x *AppendEntriesMessage) GetPrevLogTerm() int32 {
 	return 0
 }
 
-func (x *AppendEntriesMessage) GetEntries() []*LogEntry {
+func (x *AppendEntriesMessage) GetEntries() []*LogEntryMessage {
 	if x != nil {
 		return x.Entries
 	}
@@ -277,7 +277,7 @@ func (x *AppendEntriesReply) GetSuccess() bool {
 	return false
 }
 
-type LogEntry struct {
+type LogEntryMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Term          int32                  `protobuf:"varint,1,opt,name=term,proto3" json:"term,omitempty"`
 	Command       string                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`
@@ -285,20 +285,20 @@ type LogEntry struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *LogEntry) Reset() {
-	*x = LogEntry{}
+func (x *LogEntryMessage) Reset() {
+	*x = LogEntryMessage{}
 	mi := &file_raft_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LogEntry) String() string {
+func (x *LogEntryMessage) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LogEntry) ProtoMessage() {}
+func (*LogEntryMessage) ProtoMessage() {}
 
-func (x *LogEntry) ProtoReflect() protoreflect.Message {
+func (x *LogEntryMessage) ProtoReflect() protoreflect.Message {
 	mi := &file_raft_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -310,19 +310,19 @@ func (x *LogEntry) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
-func (*LogEntry) Descriptor() ([]byte, []int) {
+// Deprecated: Use LogEntryMessage.ProtoReflect.Descriptor instead.
+func (*LogEntryMessage) Descriptor() ([]byte, []int) {
 	return file_raft_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *LogEntry) GetTerm() int32 {
+func (x *LogEntryMessage) GetTerm() int32 {
 	if x != nil {
 		return x.Term
 	}
 	return 0
 }
 
-func (x *LogEntry) GetCommand() string {
+func (x *LogEntryMessage) GetCommand() string {
 	if x != nil {
 		return x.Command
 	}
@@ -342,18 +342,18 @@ const file_raft_proto_rawDesc = "" +
 	"\vlastLogTerm\x18\x04 \x01(\x05R\vlastLogTerm\"H\n" +
 	"\x10RequestVoteReply\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x05R\x04term\x12 \n" +
-	"\vvoteGranted\x18\x02 \x01(\bR\vvoteGranted\"\xd8\x01\n" +
+	"\vvoteGranted\x18\x02 \x01(\bR\vvoteGranted\"\xdf\x01\n" +
 	"\x14AppendEntriesMessage\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x05R\x04term\x12\x1a\n" +
 	"\bleaderId\x18\x02 \x01(\x05R\bleaderId\x12\"\n" +
 	"\fprevLogIndex\x18\x03 \x01(\x05R\fprevLogIndex\x12 \n" +
-	"\vprevLogTerm\x18\x04 \x01(\x05R\vprevLogTerm\x12(\n" +
-	"\aentries\x18\x05 \x03(\v2\x0e.main.LogEntryR\aentries\x12 \n" +
+	"\vprevLogTerm\x18\x04 \x01(\x05R\vprevLogTerm\x12/\n" +
+	"\aentries\x18\x05 \x03(\v2\x15.main.LogEntryMessageR\aentries\x12 \n" +
 	"\vcommitIndex\x18\x06 \x01(\x05R\vcommitIndex\"B\n" +
 	"\x12AppendEntriesReply\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x05R\x04term\x12\x18\n" +
-	"\asuccess\x18\x02 \x01(\bR\asuccess\"8\n" +
-	"\bLogEntry\x12\x12\n" +
+	"\asuccess\x18\x02 \x01(\bR\asuccess\"?\n" +
+	"\x0fLogEntryMessage\x12\x12\n" +
 	"\x04term\x18\x01 \x01(\x05R\x04term\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand2\x95\x01\n" +
 	"\vRaftService\x12?\n" +
@@ -378,10 +378,10 @@ var file_raft_proto_goTypes = []any{
 	(*RequestVoteReply)(nil),     // 1: main.RequestVoteReply
 	(*AppendEntriesMessage)(nil), // 2: main.AppendEntriesMessage
 	(*AppendEntriesReply)(nil),   // 3: main.AppendEntriesReply
-	(*LogEntry)(nil),             // 4: main.LogEntry
+	(*LogEntryMessage)(nil),      // 4: main.LogEntryMessage
 }
 var file_raft_proto_depIdxs = []int32{
-	4, // 0: main.AppendEntriesMessage.entries:type_name -> main.LogEntry
+	4, // 0: main.AppendEntriesMessage.entries:type_name -> main.LogEntryMessage
 	0, // 1: main.RaftService.RequestVote:input_type -> main.RequestVoteMessage
 	2, // 2: main.RaftService.AppendEntries:input_type -> main.AppendEntriesMessage
 	1, // 3: main.RaftService.RequestVote:output_type -> main.RequestVoteReply

@@ -9,8 +9,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // make the log first ezpz
@@ -157,6 +159,7 @@ type Node struct {
 	state   *State
 	cluster map[int]string
 	nodeId  int
+	UnimplementedRaftServiceServer
 }
 
 func NewNode(cluster map[int]string, id int) (*Node, error) {
@@ -172,17 +175,16 @@ func NewNode(cluster map[int]string, id int) (*Node, error) {
 	}, nil
 }
 
-type Server struct {
-	UnimplementedRaftServiceServer
-}
-
 // this is for receiving RequestVote from another candidate node
-func (s *Server) RequestVote(context.Context, *RequestVoteMessage) (*RequestVoteReply, error) {
-	return &RequestVoteReply{}, nil
+func (n *Node) RequestVote(context.Context, *RequestVoteMessage) (*RequestVoteReply, error) {
+	return &RequestVoteReply{
+		Term:        1,
+		VoteGranted: false,
+	}, nil
 }
 
 // this is for receiving AppendEntries from a leader node
-func (s *Server) AppendEntries(context.Context, *AppendEntriesMessage) (*AppendEntriesReply, error) {
+func (n *Node) AppendEntries(context.Context, *AppendEntriesMessage) (*AppendEntriesReply, error) {
 	return &AppendEntriesReply{}, nil
 }
 
@@ -217,6 +219,24 @@ func main() {
 	}
 
 	grpcServer := grpc.NewServer()
-	pb.Register
+	RegisterRaftServiceServer(grpcServer, node)
 
+	go grpcServer.Serve(lis)
+
+	conn, err := grpc.NewClient("localhost:9001", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		panic(err)
+	}
+
+	defer conn.Close()
+
+	c := NewRaftServiceClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	test, err := c.RequestVote(ctx, &RequestVoteMessage{})
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(test)
 }
