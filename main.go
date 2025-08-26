@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"os"
 	"strconv"
@@ -148,14 +149,31 @@ func InitState() (*State, error) {
 	}, nil
 }
 
-type Server struct {
+type Node struct {
+	state *State
 }
 
 func main() {
-	// instead of implementing discovery,
-	// just have list of machines for now?
-	machines := make([]string, 5)
-	machines[0] = "localhost:5001"
+	// parse arguments
+	// take list of machines from args
+	// max 5 machines in raft cluster
+	clusterPtr := flag.String("cluster", "", "Define Raft cluster. For example, in --cluster='1:3001,2:3002,3:3003', 1:3001 means node 1 corresponds to port 3001")
+	nodePtr := flag.Int("node", -1, "Node number of this process. Must exist in the defined Raft cluster. Ex. for --cluster='1:3001,2:3002,3:3003', valid nodes are 1, 2 and 3.")
+	flag.Parse()
+
+	cluster := make(map[int]string)
+	nodes := strings.Split(*clusterPtr, ",")
+	for _, node := range nodes {
+		splitNode := strings.Split(node, ":")
+		nodeId, err := strconv.Atoi(splitNode[0])
+		if err != nil {
+			panic("Unable to read cluster passed in args")
+		}
+		cluster[nodeId] = splitNode[1]
+	}
+
+	fmt.Println(cluster)
+	fmt.Println("node", *nodePtr)
 
 	state, err := InitState()
 	if err != nil {

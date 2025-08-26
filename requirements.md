@@ -41,7 +41,17 @@ Persist currentTerm, votedFor, log[] on machine
 
 ## RPC
 
-Use gRPC, probably easiest way. Servers should know all other servers somehow. Then we can easily do the election and all these things.r
+Use gRPC, probably easiest way. Servers should know all other servers somehow. Then we can easily do the election and all these things.
+
+Parse arguments for cluster membership so no need for discovery e.g.
+
+"./main.go --node=1 --cluster='1:3001,2:3002,3:3003'"
+
+Keep peers in memory and keep track of current leader
+
+Implement RPC between peers, as leader and as follower, between all servers
+
+Then just implement the rest, making the RPC foundation is the hardest part, everything else should be easy
 
 ### RequestVote RPC
 ### AppendEntries RPC
