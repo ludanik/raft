@@ -49,12 +49,17 @@ Parse arguments for cluster membership so no need for discovery e.g.
 
 Keep peers in memory and keep track of current leader
 
-Implement RPC between peers, as leader and as follower, between all servers
+Can't just connect once to peers at the start cuz they can go offline and back online
 
-Then just implement the rest, making the RPC foundation is the hardest part, everything else should be easy
+Need to keep all peers in memory and try to make a connection every heartbeat or whatever
 
 ### RequestVote RPC
+
+Just implement this as its written in the slides, what does the server do when it receives the RPC?
+
 ### AppendEntries RPC
+
+Implement this same way it's written in the slides, what does the server do when it receives the RPC?
 
 
 
