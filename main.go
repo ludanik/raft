@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 )
@@ -51,8 +53,9 @@ type Node struct {
 	peers  map[int32]*Peer
 	nodeId int32
 
-	stepDownCh     chan bool
-	resetTimeoutCh chan bool
+	electionTriggerCh chan bool
+	stepDownCh        chan bool
+	resetTimeoutCh    chan bool
 
 	UnimplementedRaftServiceServer
 }
@@ -73,12 +76,55 @@ func NewNode(cluster map[int]string, id int) (*Node, error) {
 		peers:          peers,
 		nodeId:         int32(id),
 		stepDownCh:     make(chan bool),
-		resetTimeoutCh: make(chan bool),
+		resetTimeoutCh: make(chan bool, 2),
 	}, nil
 }
 
 func (n *Node) Start() {
+	go n.Loop()
+	go n.TimeoutLoop()
+	for {
+		switch role := n.state.role; role {
+		case FOLLOWER:
 
+		case CANDIDATE:
+
+		case LEADER:
+
+		}
+	}
+}
+
+func (n *Node) TimeoutLoop() {
+	r := rand.New(rand.NewSource(int64(time.Now().Second())))
+	for {
+		if n.state.role == FOLLOWER {
+			timeout := (r.Int() % 2) * 2 * DEFAULT_TIMEOUT_MS
+			fmt.Println("timeout for ", time.Millisecond*time.Duration(timeout))
+			select {
+			case <-n.resetTimeoutCh:
+				continue
+			case <-time.After(time.Millisecond * time.Duration(timeout)):
+				fmt.Println("node timed out waiting for dear leader")
+				n.electionTriggerCh <- true
+			}
+		}
+	}
+}
+
+func (n *Node) StandForElection() {
+	n.state.
+}
+
+func (n *Node) Loop() {
+	for {
+		select {
+		case <-n.stepDownCh:
+			n.state.role = FOLLOWER
+		case <-n.electionTriggerCh:
+			n.StandForElection()
+		}
+	}
 }
 
 // this is for receiving RequestVote from another candidate node
@@ -115,6 +161,11 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 		return &RequestVoteReply{
 			Term:        n.state.persistentState.currentTerm,
 			VoteGranted: true,
+		}, nil
+	} else {
+		return &RequestVoteReply{
+			Term:        n.state.persistentState.currentTerm,
+			VoteGranted: false,
 		}, nil
 	}
 }
@@ -164,6 +215,8 @@ func main() {
 
 	grpcServer := grpc.NewServer()
 	RegisterRaftServiceServer(grpcServer, node)
+
+	go node.Start()
 
 	fmt.Println("Listening on port:" + nodePort)
 	grpcServer.Serve(lis)
