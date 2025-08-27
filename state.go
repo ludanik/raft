@@ -17,14 +17,14 @@ const (
 )
 
 type LogEntry struct {
-	term    int
+	term    int32
 	command string
 }
 
 type PersistentState struct {
 	log         []LogEntry
-	currentTerm int
-	votedFor    string
+	currentTerm int32
+	votedFor    int32
 }
 
 // load persistent state
@@ -39,7 +39,7 @@ func LoadState() (*PersistentState, error) {
 		return &PersistentState{
 			log:         entries,
 			currentTerm: 0,
-			votedFor:    "",
+			votedFor:    -1,
 		}, nil
 	}
 
@@ -54,7 +54,11 @@ func LoadState() (*PersistentState, error) {
 		return nil, err
 	}
 
-	votedFor := valLine[1]
+	votedFor, err := strconv.Atoi(valLine[1])
+	if err != nil {
+		return nil, err
+	}
+
 	fmt.Println("currTerm votedFor", currentTerm, votedFor)
 	entries := make([]LogEntry, len(lines)-1)
 
@@ -69,25 +73,25 @@ func LoadState() (*PersistentState, error) {
 			return nil, err
 		}
 
-		entry := LogEntry{term, splitLine[1]}
+		entry := LogEntry{int32(term), splitLine[1]}
 		entries[idx-1] = entry
 	}
 
 	return &PersistentState{
 		log:         entries,
-		currentTerm: currentTerm,
-		votedFor:    votedFor,
+		currentTerm: int32(currentTerm),
+		votedFor:    int32(votedFor),
 	}, nil
 }
 
 // only need to save log, currentTerm, votedFor
-func SaveState(state *State) error {
+func (state *State) SaveState() error {
 	// just overwrite file for now
 	currentTerm := state.persistentState.currentTerm
 	votedFor := state.persistentState.votedFor
 	log := state.persistentState.log
 
-	line1 := fmt.Sprintf("%d,%s\n", currentTerm, votedFor)
+	line1 := fmt.Sprintf("%d,%d\n", currentTerm, votedFor)
 
 	file, err := os.Create("log")
 	if err != nil {
@@ -119,16 +123,16 @@ func SaveState(state *State) error {
 }
 
 type LeaderState struct {
-	nextIndex  int
-	matchIndex int
+	nextIndex  int32
+	matchIndex int32
 }
 
 type State struct {
 	persistentState *PersistentState
 	leaderState     LeaderState
 
-	commitIndex int
-	lastApplied int
+	commitIndex int32
+	lastApplied int32
 	role        Role
 }
 

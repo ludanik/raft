@@ -1,6 +1,0 @@
-0,192.168.0.1
-0,SET?key=foo&val=bar
-0,SET?key=foo&val=baz
-1,SET?key=meow&val=cow
-2,SET?key=meow&val=now
-3,GET?key=meow

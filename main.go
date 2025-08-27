@@ -12,47 +12,68 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	DEFAULT_TIMEOUT_MS = 500
+)
+
 type Peer struct {
-	id   int
+	id   int32
 	addr string
 	conn *grpc.ClientConn
 	stub RaftServiceClient
 }
 
-func NewPeer(id int, addr string) *Peer {
-	// try connect to peer
-	conn, err := grpc.NewClient(addr)
-	if err != nil {
-		slog.Error("Could not connect to peer")
-		// need to keep trying in background
-	}
-	client := NewRaftServiceClient(conn)
-
+func NewPeer(id int32, addr string) *Peer {
+	// only try to connect to peer when u are candidate
 	return &Peer{
 		id:   id,
 		addr: addr,
-		conn: conn,
-		stub: client,
+		conn: nil,
+		stub: nil,
 	}
+}
+
+func (p *Peer) Connect() error {
+	conn, err := grpc.NewClient(p.addr)
+	if err != nil {
+		slog.Error("Could not connect to peer", err)
+		return err
+	}
+
+	client := NewRaftServiceClient(conn)
+	p.conn = conn
+	p.stub = client
+	return nil
 }
 
 type Node struct {
 	state  *State
-	peers  map[int]Peer
-	nodeId int
+	peers  map[int32]*Peer
+	nodeId int32
+
+	stepDownCh     chan bool
+	resetTimeoutCh chan bool
+
 	UnimplementedRaftServiceServer
 }
 
-func NewNode(peers map[int]string, id int) (*Node, error) {
+func NewNode(cluster map[int]string, id int) (*Node, error) {
 	state, err := InitState()
 	if err != nil {
 		return nil, err
 	}
 
+	peers := make(map[int32]*Peer)
+	for key, value := range cluster {
+		peers[int32(key)] = NewPeer(int32(key), value)
+	}
+
 	return &Node{
-		state:  state,
-		peers:  peers,
-		nodeId: id,
+		state:          state,
+		peers:          peers,
+		nodeId:         int32(id),
+		stepDownCh:     make(chan bool),
+		resetTimeoutCh: make(chan bool),
 	}, nil
 }
 
@@ -61,15 +82,45 @@ func (n *Node) Start() {
 }
 
 // this is for receiving RequestVote from another candidate node
-func (n *Node) RequestVote(context.Context, *RequestVoteMessage) (*RequestVoteReply, error) {
-	return &RequestVoteReply{
-		Term:        1,
-		VoteGranted: false,
-	}, nil
+func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*RequestVoteReply, error) {
+	if msg.Term > n.state.persistentState.currentTerm {
+		n.state.persistentState.currentTerm = msg.Term
+		n.stepDownCh <- true
+	} else if msg.Term < n.state.persistentState.currentTerm {
+		return &RequestVoteReply{
+			Term:        n.state.persistentState.currentTerm,
+			VoteGranted: false,
+		}, nil
+	}
+
+	votedFor := n.state.persistentState.votedFor
+
+	sameTerm := msg.Term == n.state.persistentState.currentTerm
+	validVote := (votedFor == msg.CandidateId) || (votedFor == -1)
+
+	lastLogTermOfServer := n.state.persistentState.log[len(n.state.persistentState.log)-1].term
+	lastLogIdxOfServer := int32(len(n.state.persistentState.log) - 1)
+
+	// "candidate's log is at least as complete as local log"
+	// what does this mean?
+	// candidateLogTerm >= serverLogTerm
+	// candidateLogIdx >= serverLogIdx
+	// this is probably wrong though
+	validLogTerm := msg.LastLogTerm >= lastLogTermOfServer
+	validLogIdx := msg.LastLogIndex >= lastLogIdxOfServer
+
+	if sameTerm && validVote && validLogIdx && validLogTerm {
+		n.resetTimeoutCh <- true
+
+		return &RequestVoteReply{
+			Term:        n.state.persistentState.currentTerm,
+			VoteGranted: true,
+		}, nil
+	}
 }
 
 // this is for receiving AppendEntries from a leader node
-func (n *Node) AppendEntries(context.Context, *AppendEntriesMessage) (*AppendEntriesReply, error) {
+func (n *Node) AppendEntries(ctx context.Context, msg *AppendEntriesMessage) (*AppendEntriesReply, error) {
 	return &AppendEntriesReply{}, nil
 }
 
@@ -81,7 +132,7 @@ func main() {
 	nodePtr := flag.Int("node", -1, "Node number of this process. Must exist in the defined Raft cluster. Ex. for --cluster='1:3001,2:3002,3:3003', valid nodes are 1, 2 and 3.")
 	flag.Parse()
 
-	peers := make(map[int]string)
+	cluster := make(map[int]string)
 	nodes := strings.Split(*clusterPtr, ",")
 	nodePort := ""
 	for _, node := range nodes {
@@ -96,15 +147,15 @@ func main() {
 			continue
 		}
 
-		peers[nodeId] = splitNode[1]
+		cluster[nodeId] = splitNode[1]
 	}
-	fmt.Println(peers)
+	fmt.Println(cluster)
 
 	if nodePort == "" {
 		panic("this node doesnt exist in cluster")
 	}
 
-	node, err := NewNode(peers, *nodePtr)
+	node, err := NewNode(cluster, *nodePtr)
 	lis, err := net.Listen("tcp", ":"+nodePort)
 
 	if err != nil {
