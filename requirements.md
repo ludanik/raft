@@ -41,17 +41,15 @@ Persist currentTerm, votedFor, log[] on machine
 
 ## RPC
 
-Use gRPC, probably easiest way. Servers should know all other servers somehow. Then we can easily do the election and all these things.
-
-Parse arguments for cluster membership so no need for discovery e.g.
-
-"./main.go --node=1 --cluster='1:3001,2:3002,3:3003'"
-
 Keep peers in memory and keep track of current leader
 
 Can't just connect once to peers at the start cuz they can go offline and back online
 
 Need to keep all peers in memory and try to make a connection every heartbeat or whatever
+
+As follower, at start of loop check connection to leader only, if time expires try reconnect to all nodes, then send out RequestVote
+
+Apparently connection autoreconnects anyway, so maybe we could try the original method of just keeping the connections in a hashmap
 
 ### RequestVote RPC
 

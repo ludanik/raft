@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -11,9 +12,33 @@ import (
 	"google.golang.org/grpc"
 )
 
+type Peer struct {
+	id   int
+	addr string
+	conn *grpc.ClientConn
+	stub RaftServiceClient
+}
+
+func NewPeer(id int, addr string) *Peer {
+	// try connect to peer
+	conn, err := grpc.NewClient(addr)
+	if err != nil {
+		slog.Error("Could not connect to peer")
+		// need to keep trying in background
+	}
+	client := NewRaftServiceClient(conn)
+
+	return &Peer{
+		id:   id,
+		addr: addr,
+		conn: conn,
+		stub: client,
+	}
+}
+
 type Node struct {
 	state  *State
-	peers  map[int]string
+	peers  map[int]Peer
 	nodeId int
 	UnimplementedRaftServiceServer
 }
@@ -29,6 +54,10 @@ func NewNode(peers map[int]string, id int) (*Node, error) {
 		peers:  peers,
 		nodeId: id,
 	}, nil
+}
+
+func (n *Node) Start() {
+
 }
 
 // this is for receiving RequestVote from another candidate node
@@ -86,6 +115,5 @@ func main() {
 	RegisterRaftServiceServer(grpcServer, node)
 
 	fmt.Println("Listening on port:" + nodePort)
-	go grpcServer.Serve(lis)
-
+	grpcServer.Serve(lis)
 }
