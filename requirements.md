@@ -43,21 +43,15 @@ Persist currentTerm, votedFor, log[] on machine
 
 Keep peers in memory and keep track of current leader
 
-Can't just connect once to peers at the start cuz they can go offline and back online
-
-Need to keep all peers in memory and try to make a connection every heartbeat or whatever
-
-As follower, at start of loop check connection to leader only, if time expires try reconnect to all nodes, then send out RequestVote
-
-Apparently connection autoreconnects anyway, so maybe we could try the original method of just keeping the connections in a hashmap
+Only need to connect to peers when u are candidate
 
 ### RequestVote RPC
 
-Just implement this as its written in the slides, what does the server do when it receives the RPC?
+You can test
 
 ### AppendEntries RPC
 
-Implement this same way it's written in the slides, what does the server do when it receives the RPC?
+Implement this same way it's written in the slides, what does the server do when it receives the RPC? Test RequestVote First
 
 
 

@@ -15,38 +15,8 @@ import (
 )
 
 const (
-	DEFAULT_TIMEOUT_MS = 500
+	DEFAULT_TIMEOUT_MS = 1000
 )
-
-type Peer struct {
-	id   int32
-	addr string
-	conn *grpc.ClientConn
-	stub RaftServiceClient
-}
-
-func NewPeer(id int32, addr string) *Peer {
-	// only try to connect to peer when u are candidate
-	return &Peer{
-		id:   id,
-		addr: addr,
-		conn: nil,
-		stub: nil,
-	}
-}
-
-func (p *Peer) Connect() error {
-	conn, err := grpc.NewClient(p.addr)
-	if err != nil {
-		slog.Error("Could not connect to peer", err)
-		return err
-	}
-
-	client := NewRaftServiceClient(conn)
-	p.conn = conn
-	p.stub = client
-	return nil
-}
 
 type Node struct {
 	state  *State
@@ -80,40 +50,116 @@ func NewNode(cluster map[int]string, id int) (*Node, error) {
 	}, nil
 }
 
-func (n *Node) Start() {
-	go n.Loop()
-	go n.TimeoutLoop()
+// the blogging guy did it this way
+func (n *Node) RunFollower() {
+	r := rand.New(rand.NewSource(int64(time.Now().Second())))
+	timeout := (r.Int()%2)*DEFAULT_TIMEOUT_MS + DEFAULT_TIMEOUT_MS
+	fmt.Println("timeout for ", time.Millisecond*time.Duration(timeout))
+
 	for {
-		switch role := n.state.role; role {
-		case FOLLOWER:
+		// timeout should be random value between T and 2T, I choose T to be 500ms
 
-		case CANDIDATE:
-
-		case LEADER:
-
+		select {
+		case <-n.resetTimeoutCh:
+			continue
+		case <-time.After(time.Millisecond * time.Duration(timeout)):
+			slog.Info("follower timed out waiting for dear leader")
+			n.state.role = CANDIDATE
+			return
 		}
 	}
 }
 
-func (n *Node) TimeoutLoop() {
+func (n *Node) RunCandidate() {
+	// stand for election
+	// try connect to every client first
+	// then try rpc to that client
+	// if you get no rpc response keep trying for that node until u get majority or timeout
+	// if you get AppendEntries rpc, stand down
+	// check if your role was changed before appointing yourself leader
+
 	r := rand.New(rand.NewSource(int64(time.Now().Second())))
-	for {
-		if n.state.role == FOLLOWER {
-			timeout := (r.Int() % 2) * 2 * DEFAULT_TIMEOUT_MS
-			fmt.Println("timeout for ", time.Millisecond*time.Duration(timeout))
-			select {
-			case <-n.resetTimeoutCh:
-				continue
-			case <-time.After(time.Millisecond * time.Duration(timeout)):
-				fmt.Println("node timed out waiting for dear leader")
-				n.electionTriggerCh <- true
+	timeout := (r.Int()%2)*DEFAULT_TIMEOUT_MS + DEFAULT_TIMEOUT_MS
+	fmt.Println("timeout for ", time.Millisecond*time.Duration(timeout))
+
+	c := make(chan bool, 1)
+	go func() {
+		// increment term each election
+		n.state.persistentState.currentTerm += 1
+
+		// vote for urself
+		votes := 1
+		// we need a majority, >50% of nodes need to give their vote
+		votesNeeded := int(len(n.peers)/2) + 1
+		fmt.Println("votesNeeded and votes", votesNeeded, votes)
+
+		for {
+			if n.state.role != CANDIDATE {
+				return
+			}
+
+			for key := range n.peers {
+				p := n.peers[key]
+				err := p.Connect()
+				if err != nil {
+					slog.Error("Couldn't connect to peer", "addr", "err", n.peers[key].addr, err)
+				}
+				slog.Error("I said I need it; this Draco undefeated; push ur block and then i bleed it")
+
+				// lastLogTerm := n.state.persistentState.log[len(n.state.persistentState.log)-1].term
+				// lastLogIdx := int32(len(n.state.persistentState.log) - 1)
+
+				// // send rpc to all
+				// msg := RequestVoteMessage{
+				// 	CandidateId:  n.nodeId,
+				// 	Term:         n.state.persistentState.currentTerm,
+				// 	LastLogIndex: lastLogIdx,
+				// 	LastLogTerm:  lastLogTerm,
+				// }
+				// fmt.Println(msg)
+
+				//reply, err := p.stub.RequestVote(context.Background(), msg)
+
+				// check how many votes we got
+				if votes == votesNeeded && n.state.role == CANDIDATE {
+					c <- true
+				}
 			}
 		}
+	}()
+
+	select {
+	case <-c:
+		// we successfully became leader
+		n.state.role = LEADER
+		break
+	case <-n.stepDownCh:
+		slog.Info("candidate received signal to step down")
+		n.state.role = FOLLOWER
+		break
+	case <-time.After(time.Millisecond * time.Duration(timeout)):
+		slog.Info("candidate timed out waiting for election to complete")
+		break
 	}
+	return
 }
 
-func (n *Node) StandForElection() {
-	n.state.
+func (n *Node) RunLeader() {
+
+}
+
+func (n *Node) Start() {
+	go n.Loop()
+	for {
+		switch n.state.role {
+		case FOLLOWER:
+			n.RunFollower()
+		case CANDIDATE:
+			n.RunCandidate()
+		case LEADER:
+			n.RunLeader()
+		}
+	}
 }
 
 func (n *Node) Loop() {
@@ -121,8 +167,6 @@ func (n *Node) Loop() {
 		select {
 		case <-n.stepDownCh:
 			n.state.role = FOLLOWER
-		case <-n.electionTriggerCh:
-			n.StandForElection()
 		}
 	}
 }
