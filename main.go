@@ -60,7 +60,7 @@ func (n *Node) RunFollower() {
 	fmt.Println("follower timeout for ", time.Millisecond*time.Duration(timeout))
 
 	for {
-		// timeout should be random value between T and 2T, I choose T to be 500ms
+		// timeout should be random value between T and 2T, I choose T to be whatever I defined above
 		select {
 		case <-n.resetTimeoutCh:
 			continue
@@ -110,6 +110,9 @@ func (n *Node) RunCandidate() {
 			}
 		}
 
+		// we need to make sure we can't get duplicate votes
+		peerSet := make(map[int]bool)
+
 		for {
 			if n.state.role != CANDIDATE {
 				return
@@ -117,6 +120,12 @@ func (n *Node) RunCandidate() {
 
 			for key := range n.peers {
 				p := n.peers[key]
+
+				// skip if we already got a vote from this node
+				if peerSet[int(p.id)] == true {
+					continue
+				}
+
 				// send rpc to all
 				msg := RequestVoteMessage{
 					CandidateId:  n.nodeId,
@@ -125,7 +134,25 @@ func (n *Node) RunCandidate() {
 					LastLogTerm:  lastLogTerm,
 				}
 
-				reply, err := p.stub.RequestVote(context.Background(), msg)
+				reply, err := p.stub.RequestVote(context.Background(), &msg)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+				if reply.VoteGranted == true {
+					peerSet[int(p.id)] = true
+					votes += 1
+				} else if reply.VoteGranted == false && reply.Term > n.state.persistentState.currentTerm {
+					// if response contains term higher than ours, we step down
+					n.state.persistentState.currentTerm = reply.Term
+					n.state.role = FOLLOWER
+					return
+				} else if reply.VoteGranted == false {
+					// if votegranted is false but term is not higher
+					// that means this node already voted for someone else
+					peerSet[int(p.id)] = true
+				}
 			}
 			// check how many votes we got
 			if votes == votesNeeded && n.state.role == CANDIDATE {
@@ -190,13 +217,21 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 		n.state.persistentState.currentTerm = msg.Term
 		n.stepDownCh <- true
 	} else if msg.Term < n.state.persistentState.currentTerm {
+		// tell client to step down
 		return &RequestVoteReply{
 			Term:        n.state.persistentState.currentTerm,
 			VoteGranted: false,
 		}, nil
 	}
 
+	// if we already voted just return
 	votedFor := n.state.persistentState.votedFor
+	if votedFor != -1 {
+		return &RequestVoteReply{
+			Term:        n.state.persistentState.currentTerm,
+			VoteGranted: false,
+		}, nil
+	}
 
 	sameTerm := msg.Term == n.state.persistentState.currentTerm
 	validVote := (votedFor == msg.CandidateId) || (votedFor == -1)
