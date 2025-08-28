@@ -54,7 +54,7 @@ func NewNode(cluster map[int]string, id int) (*Node, error) {
 func (n *Node) RunFollower() {
 	r := rand.New(rand.NewSource(int64(time.Now().Second())))
 	timeout := (r.Int()%2)*DEFAULT_TIMEOUT_MS + DEFAULT_TIMEOUT_MS
-	fmt.Println("timeout for ", time.Millisecond*time.Duration(timeout))
+	fmt.Println("follower timeout for ", time.Millisecond*time.Duration(timeout))
 
 	for {
 		// timeout should be random value between T and 2T, I choose T to be 500ms
@@ -139,6 +139,8 @@ func (n *Node) RunCandidate() {
 		break
 	case <-time.After(time.Millisecond * time.Duration(timeout)):
 		slog.Info("candidate timed out waiting for election to complete")
+		// you're not supposed to step down on timeout but I can kill the goroutine this way, so
+		n.state.role = FOLLOWER
 		break
 	}
 	return
