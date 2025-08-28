@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -19,13 +20,14 @@ const (
 )
 
 type Node struct {
+	mu sync.Mutex
+
 	state  *State
 	peers  map[int32]*Peer
 	nodeId int32
 
-	electionTriggerCh chan bool
-	stepDownCh        chan bool
-	resetTimeoutCh    chan bool
+	stepDownCh     chan bool
+	resetTimeoutCh chan bool
 
 	UnimplementedRaftServiceServer
 }
@@ -53,12 +55,12 @@ func NewNode(cluster map[int]string, id int) (*Node, error) {
 // the blogging guy did it this way
 func (n *Node) RunFollower() {
 	r := rand.New(rand.NewSource(int64(time.Now().Second())))
-	timeout := (r.Int()%2)*DEFAULT_TIMEOUT_MS + DEFAULT_TIMEOUT_MS
+	// max is 2T
+	timeout := (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/2) + DEFAULT_TIMEOUT_MS
 	fmt.Println("follower timeout for ", time.Millisecond*time.Duration(timeout))
 
 	for {
 		// timeout should be random value between T and 2T, I choose T to be 500ms
-
 		select {
 		case <-n.resetTimeoutCh:
 			continue
@@ -79,11 +81,14 @@ func (n *Node) RunCandidate() {
 	// check if your role was changed before appointing yourself leader
 
 	r := rand.New(rand.NewSource(int64(time.Now().Second())))
-	timeout := (r.Int()%2)*DEFAULT_TIMEOUT_MS + DEFAULT_TIMEOUT_MS
+	// max is 2T
+	timeout := (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/2) + DEFAULT_TIMEOUT_MS
 	fmt.Println("timeout for ", time.Millisecond*time.Duration(timeout))
 
 	c := make(chan bool, 1)
 	go func() {
+		n.mu.Lock()
+		defer n.mu.Unlock()
 		// increment term each election
 		n.state.persistentState.currentTerm += 1
 
@@ -93,6 +98,18 @@ func (n *Node) RunCandidate() {
 		votesNeeded := int(len(n.peers)/2) + 1
 		fmt.Println("votesNeeded and votes", votesNeeded, votes)
 
+		lastLogTerm := n.state.persistentState.log[len(n.state.persistentState.log)-1].term
+		lastLogIdx := int32(len(n.state.persistentState.log) - 1)
+		slog.Info("Election started, trying to get votes")
+
+		for key := range n.peers {
+			p := n.peers[key]
+			err := p.Connect()
+			if err != nil {
+				slog.Error("Couldn't connect to peer", "addr", "err", n.peers[key].addr, err)
+			}
+		}
+
 		for {
 			if n.state.role != CANDIDATE {
 				return
@@ -100,30 +117,20 @@ func (n *Node) RunCandidate() {
 
 			for key := range n.peers {
 				p := n.peers[key]
-				err := p.Connect()
-				if err != nil {
-					slog.Error("Couldn't connect to peer", "addr", "err", n.peers[key].addr, err)
+				// send rpc to all
+				msg := RequestVoteMessage{
+					CandidateId:  n.nodeId,
+					Term:         n.state.persistentState.currentTerm,
+					LastLogIndex: lastLogIdx,
+					LastLogTerm:  lastLogTerm,
 				}
-				slog.Error("I said I need it; this Draco undefeated; push ur block and then i bleed it")
 
-				// lastLogTerm := n.state.persistentState.log[len(n.state.persistentState.log)-1].term
-				// lastLogIdx := int32(len(n.state.persistentState.log) - 1)
-
-				// // send rpc to all
-				// msg := RequestVoteMessage{
-				// 	CandidateId:  n.nodeId,
-				// 	Term:         n.state.persistentState.currentTerm,
-				// 	LastLogIndex: lastLogIdx,
-				// 	LastLogTerm:  lastLogTerm,
-				// }
-				// fmt.Println(msg)
-
-				//reply, err := p.stub.RequestVote(context.Background(), msg)
-
-				// check how many votes we got
-				if votes == votesNeeded && n.state.role == CANDIDATE {
-					c <- true
-				}
+				reply, err := p.stub.RequestVote(context.Background(), msg)
+			}
+			// check how many votes we got
+			if votes == votesNeeded && n.state.role == CANDIDATE {
+				c <- true
+				return
 			}
 		}
 	}()
@@ -139,7 +146,8 @@ func (n *Node) RunCandidate() {
 		break
 	case <-time.After(time.Millisecond * time.Duration(timeout)):
 		slog.Info("candidate timed out waiting for election to complete")
-		// you're not supposed to step down on timeout but I can kill the goroutine this way, so
+		// you're not supposed to step down on timeout but I can kill the goroutine this way
+		// it will just add a small delay in exchange for saving my sanity
 		n.state.role = FOLLOWER
 		break
 	}
@@ -175,6 +183,9 @@ func (n *Node) Loop() {
 
 // this is for receiving RequestVote from another candidate node
 func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*RequestVoteReply, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	if msg.Term > n.state.persistentState.currentTerm {
 		n.state.persistentState.currentTerm = msg.Term
 		n.stepDownCh <- true
@@ -218,6 +229,9 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 
 // this is for receiving AppendEntries from a leader node
 func (n *Node) AppendEntries(ctx context.Context, msg *AppendEntriesMessage) (*AppendEntriesReply, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	return &AppendEntriesReply{}, nil
 }
 
