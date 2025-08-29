@@ -88,7 +88,9 @@ func (n *Node) RunCandidate() {
 	timeout := (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/2) + DEFAULT_TIMEOUT_MS
 	fmt.Println("timeout for ", time.Millisecond*time.Duration(timeout))
 
-	c := make(chan bool, 1)
+	electedCh := make(chan bool, 1)
+	timeoutCh := make(chan bool, 1)
+
 	go func() {
 		n.mu.Lock()
 		defer n.mu.Unlock()
@@ -99,21 +101,20 @@ func (n *Node) RunCandidate() {
 		votes := 1
 		// we need a majority, >50% of nodes need to give their vote
 		votesNeeded := int(len(n.peers)/2) + 1
-		fmt.Println("votesNeeded and votes", votesNeeded, votes)
 
-		var lastLogTerm int32
+		lastLogTerm := n.state.persistentState.currentTerm
 		var lastLogIdx int32
 
 		// this isn't right
+		// but i will leave it here for now bcoz i wanna test election
+		// TODO: do this more intelligently
 		if len(n.state.persistentState.log) == 0 {
-			lastLogTerm = 0
 			lastLogIdx = 0
 		} else {
-			lastLogTerm = n.state.persistentState.log[len(n.state.persistentState.log)-1].term
 			lastLogIdx = int32(len(n.state.persistentState.log) - 1)
 		}
 
-		slog.Info("Election started, trying to get votes")
+		slog.Info("Election started, trying to get votes", "timeout", timeout, "votesNeeded", votesNeeded, "term", lastLogTerm)
 
 		for key := range n.peers {
 			p := n.peers[key]
@@ -127,72 +128,74 @@ func (n *Node) RunCandidate() {
 		peerSet := make(map[int]bool)
 
 		for {
-			if n.state.role != CANDIDATE {
-				return
-			}
-
 			for key := range n.peers {
-				p := n.peers[key]
-
-				// skip if we already got a vote from this node
-				if peerSet[int(p.id)] == true {
-					continue
-				}
-
-				// send rpc to all
-				msg := RequestVoteMessage{
-					CandidateId:  n.nodeId,
-					Term:         n.state.persistentState.currentTerm,
-					LastLogIndex: lastLogIdx,
-					LastLogTerm:  lastLogTerm,
-				}
-
-				reply, err := p.RequestVoteFromPeer(&msg)
-				if err != nil {
-					slog.Error(err.Error())
-					continue
-				}
-
-				if reply.VoteGranted == true {
-					peerSet[int(p.id)] = true
-					votes += 1
-				} else if reply.VoteGranted == false && reply.Term > n.state.persistentState.currentTerm {
-					// if response contains term higher than ours, we step down
-					n.state.persistentState.currentTerm = reply.Term
-					n.state.role = FOLLOWER
+				select {
+				case <-timeoutCh:
 					return
-				} else if reply.VoteGranted == false {
-					// if votegranted is false but term is not higher
-					// that means this node already voted for someone else
-					peerSet[int(p.id)] = true
+				default:
+					fmt.Println("reaches here")
+					p := n.peers[key]
+
+					// skip if we already got a vote from this node
+					if peerSet[int(p.id)] == true {
+						continue
+					}
+
+					// send rpc to all
+					msg := RequestVoteMessage{
+						CandidateId:  n.nodeId,
+						Term:         n.state.persistentState.currentTerm,
+						LastLogIndex: lastLogIdx,
+						LastLogTerm:  lastLogTerm,
+					}
+
+					reply, err := p.RequestVoteFromPeer(&msg)
+					if err != nil {
+						slog.Error(err.Error())
+						continue
+					}
+
+					if reply.VoteGranted == true {
+						peerSet[int(p.id)] = true
+						votes += 1
+						slog.Info("Candidate got vote from", "addr", p.addr)
+					} else if reply.VoteGranted == false && reply.Term > n.state.persistentState.currentTerm {
+						// if response contains term higher than ours, we step down
+						n.state.persistentState.currentTerm = reply.Term
+						n.state.role = FOLLOWER
+						return
+					} else if reply.VoteGranted == false {
+						// if votegranted is false but term is not higher
+						// that means this node already voted for someone else
+						peerSet[int(p.id)] = true
+					}
 				}
-			}
-			// check how many votes we got
-			if votes == votesNeeded && n.state.role == CANDIDATE {
-				c <- true
-				return
+				// check how many votes we got
+				if votes == votesNeeded && n.state.role == CANDIDATE {
+					electedCh <- true
+					return
+				}
 			}
 		}
 	}()
 
 	select {
-	case <-c:
+	case <-electedCh:
 		// we successfully became leader
 		n.state.role = LEADER
-		panic("candidate became leader holy shit")
 		break
 	case <-n.stepDownCh:
 		slog.Info("candidate received signal to step down")
 		n.state.role = FOLLOWER
+		timeoutCh <- true
 		break
 	case <-time.After(time.Millisecond * time.Duration(timeout)):
 		slog.Info("candidate timed out waiting for election to complete")
 		// you're not supposed to step down on timeout but I can kill the goroutine this way
 		// it will just add a small delay in exchange for saving my sanity
-		n.state.role = FOLLOWER
+		timeoutCh <- true
 		break
 	}
-	return
 }
 
 func (n *Node) RunLeader() {
@@ -207,7 +210,6 @@ func (n *Node) RunLeader() {
 }
 
 func (n *Node) Start() {
-	go n.Loop()
 	for {
 		switch n.state.role {
 		case FOLLOWER:
@@ -216,15 +218,6 @@ func (n *Node) Start() {
 			n.RunCandidate()
 		case LEADER:
 			n.RunLeader()
-		}
-	}
-}
-
-func (n *Node) Loop() {
-	for {
-		select {
-		case <-n.stepDownCh:
-			n.state.role = FOLLOWER
 		}
 	}
 }
@@ -257,16 +250,26 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 	sameTerm := msg.Term == n.state.persistentState.currentTerm
 	validVote := (votedFor == msg.CandidateId) || (votedFor == -1)
 
-	lastLogTermOfServer := n.state.persistentState.log[len(n.state.persistentState.log)-1].term
-	lastLogIdxOfServer := int32(len(n.state.persistentState.log) - 1)
+	var lastLogTerm int32
+	var lastLogIdx int32
+	// this isn't right
+	// but i will leave it here for now bcoz i wanna test election
+	// TODO: do this more intelligently
+	if len(n.state.persistentState.log) == 0 {
+		lastLogTerm = 0
+		lastLogIdx = 0
+	} else {
+		lastLogTerm = n.state.persistentState.log[len(n.state.persistentState.log)-1].term
+		lastLogIdx = int32(len(n.state.persistentState.log) - 1)
+	}
 
 	// "candidate's log is at least as complete as local log"
 	// what does this mean?
 	// candidateLogTerm >= serverLogTerm
 	// candidateLogIdx >= serverLogIdx
 	// this is probably wrong though
-	validLogTerm := msg.LastLogTerm >= lastLogTermOfServer
-	validLogIdx := msg.LastLogIndex >= lastLogIdxOfServer
+	validLogTerm := msg.LastLogTerm >= lastLogTerm
+	validLogIdx := msg.LastLogIndex >= lastLogIdx
 
 	if sameTerm && validVote && validLogIdx && validLogTerm {
 		n.resetTimeoutCh <- true
