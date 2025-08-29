@@ -54,6 +54,9 @@ func NewNode(cluster map[int]string, id int) (*Node, error) {
 
 // the blogging guy did it this way
 func (n *Node) RunFollower() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
 	r := rand.New(rand.NewSource(int64(time.Now().Second())))
 	// max is 2T
 	timeout := (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/2) + DEFAULT_TIMEOUT_MS
@@ -98,8 +101,17 @@ func (n *Node) RunCandidate() {
 		votesNeeded := int(len(n.peers)/2) + 1
 		fmt.Println("votesNeeded and votes", votesNeeded, votes)
 
-		lastLogTerm := n.state.persistentState.log[len(n.state.persistentState.log)-1].term
-		lastLogIdx := int32(len(n.state.persistentState.log) - 1)
+		var lastLogTerm int32
+		var lastLogIdx int32
+
+		if len(n.state.persistentState.log) == 0 {
+			lastLogTerm = 0
+			lastLogIdx = 0
+		} else {
+			lastLogTerm = n.state.persistentState.log[len(n.state.persistentState.log)-1].term
+			lastLogIdx = int32(len(n.state.persistentState.log) - 1)
+		}
+
 		slog.Info("Election started, trying to get votes")
 
 		for key := range n.peers {
