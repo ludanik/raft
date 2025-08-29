@@ -22,8 +22,10 @@ the things I have since fixed.
 * timeout for candidate and follower
 
 = aug 29 ===================================
-fix timeouts in candidate loop
+* fix timeouts in candidate loop
 fix requestvote from server-side
 initialize log if empty
 save votedfor when receiving requestvote
+implement appendentries rpc
+implement leader behaviour
 

@@ -50,3 +50,7 @@ func (p *Peer) RequestVoteFromPeer(msg *RequestVoteMessage) (*RequestVoteReply, 
 	}
 	return reply, err
 }
+
+func (p *Peer) AppendEntryToPeer(msg *AppendEntriesMessage) (*AppendEntriesReply, error) {
+	return &AppendEntriesReply{}, nil
+}

@@ -52,7 +52,6 @@ func NewNode(cluster map[int]string, id int) (*Node, error) {
 	}, nil
 }
 
-// the blogging guy did it this way
 func (n *Node) RunFollower() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -133,7 +132,6 @@ func (n *Node) RunCandidate() {
 				case <-timeoutCh:
 					return
 				default:
-					fmt.Println("reaches here")
 					p := n.peers[key]
 
 					// skip if we already got a vote from this node
@@ -183,6 +181,7 @@ func (n *Node) RunCandidate() {
 	case <-electedCh:
 		// we successfully became leader
 		n.state.role = LEADER
+		slog.Info("candidate became dear leader")
 		break
 	case <-n.stepDownCh:
 		slog.Info("candidate received signal to step down")
@@ -191,8 +190,6 @@ func (n *Node) RunCandidate() {
 		break
 	case <-time.After(time.Millisecond * time.Duration(timeout)):
 		slog.Info("candidate timed out waiting for election to complete")
-		// you're not supposed to step down on timeout but I can kill the goroutine this way
-		// it will just add a small delay in exchange for saving my sanity
 		timeoutCh <- true
 		break
 	}
@@ -200,12 +197,9 @@ func (n *Node) RunCandidate() {
 
 func (n *Node) RunLeader() {
 	for {
-		// we were told to step down
-		if n.state.role != LEADER {
-			return
-		}
-
 		// listen for messages from client
+		// use appendentries to send heartbeat
+		// use appendentries to replicate logs across client
 	}
 }
 
