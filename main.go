@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	DEFAULT_TIMEOUT_MS = 1000
+	DEFAULT_TIMEOUT_MS = 2000
 )
 
 type Node struct {
@@ -40,7 +40,7 @@ func NewNode(cluster map[int]string, id int) (*Node, error) {
 
 	peers := make(map[int32]*Peer)
 	for key, value := range cluster {
-		peers[int32(key)] = NewPeer(int32(key), value)
+		peers[int32(key)] = NewPeer(int32(key), "localhost:"+value)
 	}
 
 	return &Node{
@@ -104,6 +104,7 @@ func (n *Node) RunCandidate() {
 		var lastLogTerm int32
 		var lastLogIdx int32
 
+		// this isn't right
 		if len(n.state.persistentState.log) == 0 {
 			lastLogTerm = 0
 			lastLogIdx = 0
@@ -146,7 +147,7 @@ func (n *Node) RunCandidate() {
 					LastLogTerm:  lastLogTerm,
 				}
 
-				reply, err := p.stub.RequestVote(context.Background(), &msg)
+				reply, err := p.RequestVoteFromPeer(&msg)
 				if err != nil {
 					slog.Error(err.Error())
 					continue
@@ -178,6 +179,7 @@ func (n *Node) RunCandidate() {
 	case <-c:
 		// we successfully became leader
 		n.state.role = LEADER
+		panic("candidate became leader holy shit")
 		break
 	case <-n.stepDownCh:
 		slog.Info("candidate received signal to step down")
@@ -194,7 +196,14 @@ func (n *Node) RunCandidate() {
 }
 
 func (n *Node) RunLeader() {
+	for {
+		// we were told to step down
+		if n.state.role != LEADER {
+			return
+		}
 
+		// listen for messages from client
+	}
 }
 
 func (n *Node) Start() {
