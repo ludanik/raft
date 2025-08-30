@@ -81,6 +81,8 @@ func (n *Node) RunCandidate() {
 	// if you get no rpc response keep trying for that node until u get majority or timeout
 	// if you get AppendEntries rpc, stand down
 	// check if your role was changed before appointing yourself leader
+	n.mu.Lock()
+	defer n.mu.Unlock()
 
 	r := rand.New(rand.NewSource(int64(time.Now().Second())))
 	// max is 2T
@@ -91,13 +93,12 @@ func (n *Node) RunCandidate() {
 	timeoutCh := make(chan bool, 1)
 
 	go func() {
-		n.mu.Lock()
-		defer n.mu.Unlock()
 		// increment term each election
 		n.state.persistentState.currentTerm += 1
 
 		// vote for urself
-		votes := 1
+		// or maybe not
+		votes := 0
 		// we need a majority, >50% of nodes need to give their vote
 		votesNeeded := int(len(n.peers)/2) + 1
 
@@ -127,71 +128,80 @@ func (n *Node) RunCandidate() {
 		peerSet := make(map[int]bool)
 
 		for {
-			for key := range n.peers {
-				select {
-				case <-timeoutCh:
-					return
-				default:
-					p := n.peers[key]
-
-					// skip if we already got a vote from this node
-					if peerSet[int(p.id)] == true {
-						continue
-					}
-
-					// send rpc to all
-					msg := RequestVoteMessage{
-						CandidateId:  n.nodeId,
-						Term:         n.state.persistentState.currentTerm,
-						LastLogIndex: lastLogIdx,
-						LastLogTerm:  lastLogTerm,
-					}
-
-					reply, err := p.RequestVoteFromPeer(&msg)
-					if err != nil {
-						slog.Error(err.Error())
-						continue
-					}
-
-					if reply.VoteGranted == true {
-						peerSet[int(p.id)] = true
-						votes += 1
-						slog.Info("Candidate got vote from", "addr", p.addr)
-					} else if reply.VoteGranted == false && reply.Term > n.state.persistentState.currentTerm {
-						// if response contains term higher than ours, we step down
-						n.state.persistentState.currentTerm = reply.Term
-						n.state.role = FOLLOWER
+			select {
+			case <-timeoutCh:
+				return
+			default:
+				for key := range n.peers {
+					select {
+					case <-timeoutCh:
 						return
-					} else if reply.VoteGranted == false {
-						// if votegranted is false but term is not higher
-						// that means this node already voted for someone else
-						peerSet[int(p.id)] = true
+					default:
+						p := n.peers[key]
+
+						// skip if we already got a vote from this node
+						if peerSet[int(p.id)] == true {
+							continue
+						}
+
+						// send rpc to all
+						msg := RequestVoteMessage{
+							CandidateId:  n.nodeId,
+							Term:         n.state.persistentState.currentTerm,
+							LastLogIndex: lastLogIdx,
+							LastLogTerm:  lastLogTerm,
+						}
+
+						reply, err := p.RequestVoteFromPeer(&msg)
+						if err != nil {
+							slog.Error(err.Error())
+							continue
+						}
+
+						slog.Info("response: ", "voteGranted", reply.VoteGranted)
+
+						if reply.VoteGranted == true {
+							peerSet[int(p.id)] = true
+							votes += 1
+							slog.Info("Candidate got vote from", "addr", p.addr)
+						} else if reply.VoteGranted == false && reply.Term > n.state.persistentState.currentTerm {
+							// if response contains term higher than ours, we step down
+							n.state.persistentState.currentTerm = reply.Term
+							n.state.role = FOLLOWER
+							return
+						} else if reply.VoteGranted == false {
+							// if votegranted is false but term is not higher
+							// that means this node already voted for someone else
+							peerSet[int(p.id)] = true
+						}
 					}
-				}
-				// check how many votes we got
-				if votes == votesNeeded && n.state.role == CANDIDATE {
-					electedCh <- true
-					return
+					// check how many votes we got
+					if votes == votesNeeded && n.state.role == CANDIDATE {
+						electedCh <- true
+						return
+					}
 				}
 			}
 		}
 	}()
 
-	select {
-	case <-electedCh:
-		// we successfully became leader
-		n.state.role = LEADER
-		slog.Info("candidate became dear leader")
-		break
-	case <-n.stepDownCh:
-		slog.Info("candidate received signal to step down")
-		n.state.role = FOLLOWER
-		timeoutCh <- true
-		break
-	case <-time.After(time.Millisecond * time.Duration(timeout)):
-		slog.Info("candidate timed out waiting for election to complete")
-		timeoutCh <- true
-		break
+	for {
+		select {
+		case <-electedCh:
+			// we successfully became leader
+			n.state.role = LEADER
+			slog.Info("candidate became dear leader")
+			return
+		case <-n.stepDownCh:
+			slog.Info("candidate received signal to step down")
+			n.state.role = FOLLOWER
+			timeoutCh <- true
+			return
+		case <-time.After(time.Millisecond * time.Duration(timeout)):
+			slog.Info("candidate timed out waiting for election to complete")
+			timeoutCh <- true
+			return
+		}
 	}
 }
 

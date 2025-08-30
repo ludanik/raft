@@ -22,10 +22,14 @@ the things I have since fixed.
 * timeout for candidate and follower
 
 = aug 29 ===================================
-* fix timeouts in candidate loop
-fix requestvote from server-side
+* fix timeouts in candidate loops
+leader election working with 2 votes on 3 machines
 initialize log if empty
+fix requestvote from server-side
 save votedfor when receiving requestvote
 implement appendentries rpc
 implement leader behaviour
+
+= aug 30 ===================================
+installation and deployment instructions on repo
 
