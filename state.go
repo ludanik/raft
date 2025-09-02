@@ -24,7 +24,7 @@ type LogEntry struct {
 
 // load persistent state
 func (n *Node) LoadPersistentState() error {
-	file, err := os.ReadFile("log")
+	file, err := os.ReadFile(fmt.Sprintf("log%d", n.nodeId))
 	if err != nil {
 		slog.Error("Log file not found")
 		// probably because it doesnt exist
@@ -85,7 +85,7 @@ func (n *Node) SavePersistentState() error {
 
 	line1 := fmt.Sprintf("%d,%d\n", n.currentTerm, n.votedFor)
 
-	file, err := os.Create("log")
+	file, err := os.Create(fmt.Sprintf("log%d", n.nodeId))
 	if err != nil {
 		return err
 	}

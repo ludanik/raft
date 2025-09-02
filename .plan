@@ -1,7 +1,4 @@
-[idsoftware.com]
-Login name: johnc In real life: John Carmack
-Directory: /raid/nardo/johnc Shell: /bin/csh
-Never logged in.
+[ludanik.dev]
 Plan:
 
 This is my daily work ...
@@ -14,8 +11,6 @@ before they get fixed.
 
 Occasionally I go back through the old notes and mark with a +
 the things I have since fixed.
-
---- John Carmack
 
 = aug 28 ===================================
 * rpc into other servers
@@ -31,8 +26,9 @@ implement appendentries rpc
 implement leader behaviour
 
 = aug 30 ===================================
-installation and deployment instructions on repo
++ installation and deployment instructions on repo
 
 = sept 2 ===================================
+* refactor node and state
 fix log initialization
 

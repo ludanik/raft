@@ -39,10 +39,10 @@ func (p *Peer) Connect() error {
 	return nil
 }
 
-func (p *Peer) RequestVoteFromPeer(msg *RequestVoteMessage) (*RequestVoteReply, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*10000)
+func (p *Peer) RequestVoteFromPeer(msg *RequestVoteMessage, timeout time.Duration) (*RequestVoteReply, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout/10)
 	defer cancel()
-	slog.Info("Trying to request vote from", "addr", p.addr)
+	slog.Info("Trying to request vote", "addr", p.addr, "timeout", timeout/10)
 	reply, err := p.stub.RequestVote(ctx, msg)
 	if err != nil {
 		return nil, err

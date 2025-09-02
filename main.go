@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DEFAULT_TIMEOUT_MS = 2000
+	DEFAULT_TIMEOUT_MIN_MS = 1000
 )
 
 type Node struct {
@@ -72,17 +72,26 @@ func (n *Node) RunFollower() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	r := rand.New(rand.NewSource(int64(time.Now().Second())))
 	// max is 2T
-	timeout := (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/2) + DEFAULT_TIMEOUT_MS
-	fmt.Println("follower timeout for ", time.Millisecond*time.Duration(timeout))
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	minDuration := (DEFAULT_TIMEOUT_MIN_MS) * time.Millisecond
+	maxDuration := (DEFAULT_TIMEOUT_MIN_MS * 2) * time.Millisecond
+
+	durationRange := maxDuration - minDuration
+
+	randomOffset := time.Duration(r.Int63n(int64(durationRange)))
+
+	timeout := minDuration + randomOffset
+
+	fmt.Println("follower timeout for ", timeout)
 
 	for {
 		// timeout should be random value between T and 2T, I choose T to be whatever I defined above
 		select {
 		case <-n.resetTimeoutCh:
 			continue
-		case <-time.After(time.Millisecond * time.Duration(timeout)):
+		case <-time.After(timeout):
 			slog.Info("follower timed out waiting for dear leader")
 			n.role = CANDIDATE
 			return
@@ -100,10 +109,19 @@ func (n *Node) RunCandidate() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	r := rand.New(rand.NewSource(int64(time.Now().Second())))
 	// max is 2T
-	timeout := (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/4) + (r.Int()%2)*(DEFAULT_TIMEOUT_MS/2) + DEFAULT_TIMEOUT_MS
-	fmt.Println("timeout for ", time.Millisecond*time.Duration(timeout))
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	minDuration := (DEFAULT_TIMEOUT_MIN_MS) * time.Millisecond
+	maxDuration := (DEFAULT_TIMEOUT_MIN_MS * 2) * time.Millisecond
+
+	durationRange := maxDuration - minDuration
+
+	randomOffset := time.Duration(r.Int63n(int64(durationRange)))
+
+	timeout := minDuration + randomOffset
+
+	fmt.Println("timeout for ", timeout)
 
 	electedCh := make(chan bool, 1)
 	timeoutCh := make(chan bool, 1)
@@ -168,7 +186,7 @@ func (n *Node) RunCandidate() {
 							LastLogTerm:  lastLogTerm,
 						}
 
-						reply, err := p.RequestVoteFromPeer(&msg)
+						reply, err := p.RequestVoteFromPeer(&msg, timeout)
 						if err != nil {
 							slog.Error(err.Error())
 							continue
@@ -206,15 +224,18 @@ func (n *Node) RunCandidate() {
 		case <-electedCh:
 			// we successfully became leader
 			n.role = LEADER
+			n.votedFor = -1
 			slog.Info("candidate became dear leader")
 			return
 		case <-n.stepDownCh:
 			slog.Info("candidate received signal to step down")
 			n.role = FOLLOWER
+			n.votedFor = -1
 			timeoutCh <- true
 			return
-		case <-time.After(time.Millisecond * time.Duration(timeout)):
+		case <-time.After(timeout):
 			slog.Info("candidate timed out waiting for election to complete")
+			n.votedFor = -1
 			timeoutCh <- true
 			return
 		}
@@ -226,6 +247,7 @@ func (n *Node) RunLeader() {
 		// listen for messages from client
 		// use appendentries to send heartbeat
 		// use appendentries to replicate logs across client
+		// step down if a server returns a higher term on rpc call
 	}
 }
 
@@ -244,9 +266,6 @@ func (n *Node) Start() {
 
 // this is for receiving RequestVote from another candidate node
 func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*RequestVoteReply, error) {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	if msg.Term > n.currentTerm {
 		n.currentTerm = msg.Term
 		n.stepDownCh <- true
@@ -259,8 +278,7 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 	}
 
 	// if we already voted just return
-	votedFor := n.votedFor
-	if votedFor != -1 {
+	if n.votedFor != -1 {
 		return &RequestVoteReply{
 			Term:        n.currentTerm,
 			VoteGranted: false,
@@ -268,7 +286,7 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 	}
 
 	sameTerm := msg.Term == n.currentTerm
-	validVote := (votedFor == msg.CandidateId) || (votedFor == -1)
+	validVote := (n.votedFor == msg.CandidateId) || (n.votedFor == -1)
 
 	var lastLogTerm int32
 	var lastLogIdx int32
@@ -293,6 +311,8 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 
 	if sameTerm && validVote && validLogIdx && validLogTerm {
 		n.resetTimeoutCh <- true
+		n.votedFor = msg.CandidateId
+		n.SavePersistentState()
 
 		return &RequestVoteReply{
 			Term:        n.currentTerm,
