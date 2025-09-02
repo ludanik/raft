@@ -22,7 +22,7 @@ kubectl apply -f deployment.yaml
 3. Get the pod name and view its output
 ```shell script
 kubectl get pods
-kubectl logs -f <POD_NAME>
+kubectl logs -f POD_NAME
 ```
 
 
