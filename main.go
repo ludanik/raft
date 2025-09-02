@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -20,9 +21,23 @@ const (
 )
 
 type Node struct {
+	/* PERSISTENT STATE */
+	log         []LogEntry
+	currentTerm int32
+	votedFor    int32
+
+	/* VOLATILE STATE */
+	commitIndex int32
+	lastApplied int32
+	role        Role
+
+	/* LEADER STATE */
+	nextIndex  int32
+	matchIndex int32
+
+	/* IMPLEMENTATION DETAILS */
 	mu sync.Mutex
 
-	state  *State
 	peers  map[int32]*Peer
 	nodeId int32
 
@@ -33,23 +48,24 @@ type Node struct {
 }
 
 func NewNode(cluster map[int]string, id int) (*Node, error) {
-	state, err := InitState()
-	if err != nil {
-		return nil, err
-	}
-
 	peers := make(map[int32]*Peer)
 	for key, value := range cluster {
 		peers[int32(key)] = NewPeer(int32(key), "localhost:"+value)
 	}
 
-	return &Node{
-		state:          state,
+	n := Node{
 		peers:          peers,
 		nodeId:         int32(id),
 		stepDownCh:     make(chan bool),
 		resetTimeoutCh: make(chan bool, 2),
-	}, nil
+	}
+
+	err := n.LoadPersistentState()
+	if err != nil {
+		log.Fatal("Could not load persistent state")
+	}
+
+	return &n, nil
 }
 
 func (n *Node) RunFollower() {
@@ -68,7 +84,7 @@ func (n *Node) RunFollower() {
 			continue
 		case <-time.After(time.Millisecond * time.Duration(timeout)):
 			slog.Info("follower timed out waiting for dear leader")
-			n.state.role = CANDIDATE
+			n.role = CANDIDATE
 			return
 		}
 	}
@@ -94,7 +110,7 @@ func (n *Node) RunCandidate() {
 
 	go func() {
 		// increment term each election
-		n.state.persistentState.currentTerm += 1
+		n.currentTerm += 1
 
 		// vote for urself
 		// or maybe not
@@ -102,16 +118,16 @@ func (n *Node) RunCandidate() {
 		// we need a majority, >50% of nodes need to give their vote
 		votesNeeded := int(len(n.peers)/2) + 1
 
-		lastLogTerm := n.state.persistentState.currentTerm
+		lastLogTerm := n.currentTerm
 		var lastLogIdx int32
 
 		// this isn't right
 		// but i will leave it here for now bcoz i wanna test election
 		// TODO: do this more intelligently
-		if len(n.state.persistentState.log) == 0 {
+		if len(n.log) == 0 {
 			lastLogIdx = 0
 		} else {
-			lastLogIdx = int32(len(n.state.persistentState.log) - 1)
+			lastLogIdx = int32(len(n.log) - 1)
 		}
 
 		slog.Info("Election started, trying to get votes", "timeout", timeout, "votesNeeded", votesNeeded, "term", lastLogTerm)
@@ -147,7 +163,7 @@ func (n *Node) RunCandidate() {
 						// send rpc to all
 						msg := RequestVoteMessage{
 							CandidateId:  n.nodeId,
-							Term:         n.state.persistentState.currentTerm,
+							Term:         n.currentTerm,
 							LastLogIndex: lastLogIdx,
 							LastLogTerm:  lastLogTerm,
 						}
@@ -164,10 +180,10 @@ func (n *Node) RunCandidate() {
 							peerSet[int(p.id)] = true
 							votes += 1
 							slog.Info("Candidate got vote from", "addr", p.addr)
-						} else if reply.VoteGranted == false && reply.Term > n.state.persistentState.currentTerm {
+						} else if reply.VoteGranted == false && reply.Term > n.currentTerm {
 							// if response contains term higher than ours, we step down
-							n.state.persistentState.currentTerm = reply.Term
-							n.state.role = FOLLOWER
+							n.currentTerm = reply.Term
+							n.role = FOLLOWER
 							return
 						} else if reply.VoteGranted == false {
 							// if votegranted is false but term is not higher
@@ -176,7 +192,7 @@ func (n *Node) RunCandidate() {
 						}
 					}
 					// check how many votes we got
-					if votes == votesNeeded && n.state.role == CANDIDATE {
+					if votes == votesNeeded && n.role == CANDIDATE {
 						electedCh <- true
 						return
 					}
@@ -189,12 +205,12 @@ func (n *Node) RunCandidate() {
 		select {
 		case <-electedCh:
 			// we successfully became leader
-			n.state.role = LEADER
+			n.role = LEADER
 			slog.Info("candidate became dear leader")
 			return
 		case <-n.stepDownCh:
 			slog.Info("candidate received signal to step down")
-			n.state.role = FOLLOWER
+			n.role = FOLLOWER
 			timeoutCh <- true
 			return
 		case <-time.After(time.Millisecond * time.Duration(timeout)):
@@ -215,7 +231,7 @@ func (n *Node) RunLeader() {
 
 func (n *Node) Start() {
 	for {
-		switch n.state.role {
+		switch n.role {
 		case FOLLOWER:
 			n.RunFollower()
 		case CANDIDATE:
@@ -231,27 +247,27 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if msg.Term > n.state.persistentState.currentTerm {
-		n.state.persistentState.currentTerm = msg.Term
+	if msg.Term > n.currentTerm {
+		n.currentTerm = msg.Term
 		n.stepDownCh <- true
-	} else if msg.Term < n.state.persistentState.currentTerm {
+	} else if msg.Term < n.currentTerm {
 		// tell client to step down
 		return &RequestVoteReply{
-			Term:        n.state.persistentState.currentTerm,
+			Term:        n.currentTerm,
 			VoteGranted: false,
 		}, nil
 	}
 
 	// if we already voted just return
-	votedFor := n.state.persistentState.votedFor
+	votedFor := n.votedFor
 	if votedFor != -1 {
 		return &RequestVoteReply{
-			Term:        n.state.persistentState.currentTerm,
+			Term:        n.currentTerm,
 			VoteGranted: false,
 		}, nil
 	}
 
-	sameTerm := msg.Term == n.state.persistentState.currentTerm
+	sameTerm := msg.Term == n.currentTerm
 	validVote := (votedFor == msg.CandidateId) || (votedFor == -1)
 
 	var lastLogTerm int32
@@ -259,12 +275,12 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 	// this isn't right
 	// but i will leave it here for now bcoz i wanna test election
 	// TODO: do this more intelligently
-	if len(n.state.persistentState.log) == 0 {
+	if len(n.log) == 0 {
 		lastLogTerm = 0
 		lastLogIdx = 0
 	} else {
-		lastLogTerm = n.state.persistentState.log[len(n.state.persistentState.log)-1].term
-		lastLogIdx = int32(len(n.state.persistentState.log) - 1)
+		lastLogTerm = n.log[len(n.log)-1].term
+		lastLogIdx = int32(len(n.log) - 1)
 	}
 
 	// "candidate's log is at least as complete as local log"
@@ -279,12 +295,12 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 		n.resetTimeoutCh <- true
 
 		return &RequestVoteReply{
-			Term:        n.state.persistentState.currentTerm,
+			Term:        n.currentTerm,
 			VoteGranted: true,
 		}, nil
 	} else {
 		return &RequestVoteReply{
-			Term:        n.state.persistentState.currentTerm,
+			Term:        n.currentTerm,
 			VoteGranted: false,
 		}, nil
 	}

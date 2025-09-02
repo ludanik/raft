@@ -33,3 +33,6 @@ implement leader behaviour
 = aug 30 ===================================
 installation and deployment instructions on repo
 
+= sept 2 ===================================
+fix log initialization
+
