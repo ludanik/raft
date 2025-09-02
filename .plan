@@ -18,10 +18,10 @@ the things I have since fixed.
 
 = aug 29 ===================================
 * fix timeouts in candidate loops
-leader election working with 2 votes on 3 machines
-initialize log if empty
-fix requestvote from server-side
-save votedfor when receiving requestvote
++ leader election working with 2 votes on 3 machines
++ initialize log if empty
++ fix requestvote from server-side
++ save votedfor when receiving requestvote
 implement appendentries rpc
 implement leader behaviour
 
@@ -30,5 +30,5 @@ implement leader behaviour
 
 = sept 2 ===================================
 * refactor node and state
-fix log initialization
+* fix log initialization
 
