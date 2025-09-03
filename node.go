@@ -49,6 +49,7 @@ type Node struct {
 
 	stepDownCh     chan bool
 	resetTimeoutCh chan bool
+	newEntryCh     chan LogEntry
 
 	UnimplementedRaftServiceServer
 }
@@ -64,6 +65,7 @@ func NewNode(cluster map[int]string, id int) (*Node, error) {
 		nodeId:         int32(id),
 		stepDownCh:     make(chan bool),
 		resetTimeoutCh: make(chan bool, 2),
+		newEntryCh:     make(chan LogEntry),
 	}
 
 	err := n.LoadPersistentState()
@@ -240,39 +242,60 @@ func (n *Node) RunCandidate() {
 
 // TODO: implement simple REST api to give commands to the leader
 func (n *Node) RunLeader() {
-	timeout := GetTimeoutMs() / 5
+	timeout := time.Duration((DEFAULT_TIMEOUT_MIN_MS / 2) * time.Millisecond)
+
+	heartBeatCh := make(chan bool)
+	// this looks dumb but it helps
+	stepDownCh := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-stepDownCh:
+				return
+			case <-heartBeatCh:
+				for key := range n.peers {
+					p := n.peers[key]
+
+					// heartbeat is appendentries with empty log
+					msg := AppendEntriesMessage{
+						Term:         n.currentTerm,
+						LeaderId:     n.nodeId,
+						PrevLogIndex: int32(len(n.log) - 1),
+						PrevLogTerm:  n.log[len(n.log)-1].term,
+						CommitIndex:  n.commitIndex,
+						Entries:      nil,
+					}
+
+					deadlineTimeout := timeout / 2
+
+					reply, err := p.AppendEntriesToPeer(&msg, deadlineTimeout)
+					if err != nil {
+						slog.Error(err.Error())
+						continue
+					}
+
+					slog.Info("response: ", "success", reply.Success, "term", reply.Term)
+
+					if reply.Success == false && reply.Term > n.currentTerm {
+						// step down
+						n.role = FOLLOWER
+						return
+					}
+				}
+			case <-n.newEntryCh:
+
+			}
+		}
+	}()
+
 	for {
 		select {
 		case <-n.stepDownCh:
+			stepDownCh <- true
 			n.role = FOLLOWER
 			return
-		default:
-			for key := range n.peers {
-				p := n.peers[key]
-
-				// send rpc to all
-				msg := AppendEntriesMessage{
-					Term:         n.currentTerm,
-					LeaderId:     n.nodeId,
-					PrevLogIndex: int32(len(n.log) - 1),
-					PrevLogTerm:  n.log[len(n.log)-1].term,
-					CommitIndex:  n.commitIndex,
-				}
-
-				reply, err := p.AppendEntriesToPeer(&msg, timeout)
-				if err != nil {
-					slog.Error(err.Error())
-					continue
-				}
-
-				slog.Info("response: ", "success", reply.Success, "term", reply.Term)
-
-				if reply.Success == false && reply.Term > n.currentTerm {
-					// step down
-					n.role = FOLLOWER
-					return
-				}
-			}
+		case <-time.After(timeout):
+			heartBeatCh <- true
 		}
 	}
 }

@@ -33,6 +33,8 @@ implement leader behaviour
 * fix log initialization
 
 = sept 3 ===================================
+* reorganized code
+* leader heartbeat
 leader listens for commands from client
 followers redirect to leader 
 
