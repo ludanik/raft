@@ -9,19 +9,6 @@ import (
 	"strings"
 )
 
-type Role int
-
-const (
-	FOLLOWER Role = iota
-	CANDIDATE
-	LEADER
-)
-
-type LogEntry struct {
-	term    int32
-	command string
-}
-
 // load persistent state
 func (n *Node) LoadPersistentState() error {
 	file, err := os.ReadFile(fmt.Sprintf("log%d", n.nodeId))
