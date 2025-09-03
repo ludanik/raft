@@ -32,3 +32,8 @@ implement leader behaviour
 * refactor node and state
 * fix log initialization
 
+= sept 3 ===================================
+leader listens for commands from client
+followers redirect to leader 
+
+

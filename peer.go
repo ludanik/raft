@@ -39,6 +39,7 @@ func (p *Peer) Connect() error {
 	return nil
 }
 
+// we separate this into its own method so we can use gRPC deadlines
 func (p *Peer) RequestVoteFromPeer(msg *RequestVoteMessage, timeout time.Duration) (*RequestVoteReply, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout/10)
 	defer cancel()
@@ -50,6 +51,14 @@ func (p *Peer) RequestVoteFromPeer(msg *RequestVoteMessage, timeout time.Duratio
 	return reply, err
 }
 
-func (p *Peer) AppendEntryToPeer(msg *AppendEntriesMessage) (*AppendEntriesReply, error) {
-	return &AppendEntriesReply{}, nil
+// we separate this into its own method so we can use gRPC deadlines
+func (p *Peer) AppendEntriesToPeer(msg *AppendEntriesMessage, timeout time.Duration) (*AppendEntriesReply, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout/10)
+	defer cancel()
+	slog.Info("Trying to append entries", "addr", p.addr, "timeout", timeout/10)
+	reply, err := p.stub.AppendEntries(ctx, msg)
+	if err != nil {
+		return nil, err
+	}
+	return reply, err
 }

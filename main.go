@@ -20,6 +20,20 @@ const (
 	DEFAULT_TIMEOUT_MIN_MS = 1000
 )
 
+func GetTimeoutMs() time.Duration {
+	// timeout should be in range [T,2T]
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	minDuration := (DEFAULT_TIMEOUT_MIN_MS) * time.Millisecond
+	maxDuration := (DEFAULT_TIMEOUT_MIN_MS * 2) * time.Millisecond
+
+	durationRange := maxDuration - minDuration
+
+	randomOffset := time.Duration(r.Int63n(int64(durationRange)))
+
+	return minDuration + randomOffset
+}
+
 type Node struct {
 	/* PERSISTENT STATE */
 	log         []LogEntry
@@ -72,17 +86,7 @@ func (n *Node) RunFollower() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// max is 2T
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	minDuration := (DEFAULT_TIMEOUT_MIN_MS) * time.Millisecond
-	maxDuration := (DEFAULT_TIMEOUT_MIN_MS * 2) * time.Millisecond
-
-	durationRange := maxDuration - minDuration
-
-	randomOffset := time.Duration(r.Int63n(int64(durationRange)))
-
-	timeout := minDuration + randomOffset
+	timeout := GetTimeoutMs()
 
 	fmt.Println("follower timeout for ", timeout)
 
@@ -109,17 +113,7 @@ func (n *Node) RunCandidate() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// max is 2T
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-
-	minDuration := (DEFAULT_TIMEOUT_MIN_MS) * time.Millisecond
-	maxDuration := (DEFAULT_TIMEOUT_MIN_MS * 2) * time.Millisecond
-
-	durationRange := maxDuration - minDuration
-
-	randomOffset := time.Duration(r.Int63n(int64(durationRange)))
-
-	timeout := minDuration + randomOffset
+	timeout := GetTimeoutMs()
 
 	fmt.Println("timeout for ", timeout)
 
@@ -127,12 +121,9 @@ func (n *Node) RunCandidate() {
 	timeoutCh := make(chan bool, 1)
 
 	go func() {
-		// increment term each election
 		n.currentTerm += 1
-
-		// vote for urself
-		// or maybe not
-		votes := 0
+		// vote for self
+		votes := 1
 		// we need a majority, >50% of nodes need to give their vote
 		votesNeeded := int(len(n.peers)/2) + 1
 
@@ -242,13 +233,47 @@ func (n *Node) RunCandidate() {
 	}
 }
 
+// TODO: implement simple REST api to give commands to the leader
 func (n *Node) RunLeader() {
+	timeout := GetTimeoutMs() / 5
 	for {
-		// listen for messages from client
-		// use appendentries to send heartbeat
-		// use appendentries to replicate logs across client
-		// step down if a server returns a higher term on rpc call
+		select {
+		case <-n.stepDownCh:
+			n.role = FOLLOWER
+			return
+		default:
+			for key := range n.peers {
+				p := n.peers[key]
+
+				// send rpc to all
+				msg := AppendEntriesMessage{
+					Term:         n.currentTerm,
+					LeaderId:     n.nodeId,
+					PrevLogIndex: int32(len(n.log) - 1),
+					PrevLogTerm:  n.log[len(n.log)-1].term,
+					CommitIndex:  n.commitIndex,
+				}
+
+				reply, err := p.AppendEntriesToPeer(&msg, timeout)
+				if err != nil {
+					slog.Error(err.Error())
+					continue
+				}
+
+				slog.Info("response: ", "success", reply.Success, "term", reply.Term)
+
+				if reply.Success == false && reply.Term > n.currentTerm {
+					// step down
+					n.role = FOLLOWER
+					return
+				}
+			}
+		}
 	}
+}
+
+func (n *Node) StartHttpServer() {
+
 }
 
 func (n *Node) Start() {
@@ -266,6 +291,8 @@ func (n *Node) Start() {
 
 // this is for receiving RequestVote from another candidate node
 func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*RequestVoteReply, error) {
+	// TODO: fix race conditions
+
 	if msg.Term > n.currentTerm {
 		n.currentTerm = msg.Term
 		n.stepDownCh <- true
@@ -331,7 +358,41 @@ func (n *Node) AppendEntries(ctx context.Context, msg *AppendEntriesMessage) (*A
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	return &AppendEntriesReply{}, nil
+	if msg.Term < n.currentTerm {
+		return &AppendEntriesReply{
+			Term:    n.currentTerm,
+			Success: false,
+		}, nil
+	}
+
+	if n.log[msg.PrevLogIndex].term != msg.PrevLogTerm {
+		return &AppendEntriesReply{
+			Term:    msg.Term,
+			Success: false,
+		}, nil
+	}
+
+	// only reset timeout if valid rpc ? doesn't make sense to reset if it's invalid
+	n.resetTimeoutCh <- true
+
+	// heartbeat
+	if msg.Entries == nil {
+		return &AppendEntriesReply{
+			Term:    msg.Term,
+			Success: true,
+		}, nil
+	}
+
+	// append entries
+
+	for idx, entry := range msg.Entries {
+
+	}
+
+	return &AppendEntriesReply{
+		Term:    msg.Term,
+		Success: true,
+	}, nil
 }
 
 func main() {

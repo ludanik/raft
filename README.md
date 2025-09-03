@@ -1,9 +1,7 @@
 Raft
 ==================
 
-My implementation of the Raft distributed consensus protocol in Go, as described by the [Raft paper](https://raft.github.io/raft.pdf#page=1&zoom=200,87,407).
-
-This implementation supports all features described in the paper, except for snapshotting and cluster membership changes.
+My implementation of the Raft distributed consensus protocol in Go, as described by the [Raft paper](https://raft.github.io/raft.pdf#page=1&zoom=200,87,407). This implementation supports all features described in the paper, except for snapshotting and cluster membership changes.
 
 ## Getting Started
 
@@ -37,6 +35,13 @@ kubectl apply -f deployment.yaml
 ```shell script
 kubectl get pods
 kubectl logs -f POD_NAME
+```
+
+## Misc
+
+To regenerate Protobuf files
+```shell script
+protoc --go_out=. --go-grpc_out=. raft.proto
 ```
 
 
