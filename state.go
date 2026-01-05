@@ -59,7 +59,7 @@ func (n *Node) LoadPersistentState() error {
 			return err
 		}
 
-		entry := LogEntry{int32(term), splitLine[1]}
+		entry := LogEntry{term: int32(term), command: splitLine[1]}
 		entries = append(entries, entry)
 	}
 
