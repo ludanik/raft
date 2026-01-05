@@ -22,8 +22,8 @@ the things I have since fixed.
 + initialize log if empty
 + fix requestvote from server-side
 + save votedfor when receiving requestvote
-implement appendentries rpc
-implement leader behaviour
++ implement appendentries rpc
++ implement leader behaviour
 
 = aug 30 ===================================
 + installation and deployment instructions on repo
@@ -35,7 +35,7 @@ implement leader behaviour
 = sept 3 ===================================
 * reorganized code
 * leader heartbeat
-leader listens for commands from client
-followers redirect to leader 
++ leader listens for commands from client
++ followers redirect to leader 
 
 
