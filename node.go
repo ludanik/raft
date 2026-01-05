@@ -134,17 +134,9 @@ func (n *Node) RunCandidate() {
 		// we need a majority, >50% of nodes need to give their vote
 		votesNeeded := int(len(n.peers)/2) + 1
 
-		lastLogTerm := n.currentTerm
-		var lastLogIdx int32
-
-		// this isn't right
-		// but i will leave it here for now bcoz i wanna test election
-		// TODO: do this more intelligently
-		if len(n.log) == 0 {
-			lastLogIdx = 0
-		} else {
-			lastLogIdx = int32(len(n.log) - 1)
-		}
+		// Get last log entry's term and index
+		lastLogIdx := int32(len(n.log) - 1)
+		lastLogTerm := n.log[lastLogIdx].term
 
 		slog.Info("Election started, trying to get votes", "timeout", timeout, "votesNeeded", votesNeeded, "term", lastLogTerm)
 
@@ -242,6 +234,11 @@ func (n *Node) RunCandidate() {
 
 // TODO: implement simple REST api to give commands to the leader
 func (n *Node) RunLeader() {
+	n.mu.Lock()
+	// Set leader node ID when becoming leader
+	n.leaderNodeId = n.nodeId
+	n.mu.Unlock()
+
 	timeout := time.Duration((DEFAULT_TIMEOUT_MIN_MS / 2) * time.Millisecond)
 
 	heartBeatCh := make(chan bool)
@@ -253,6 +250,7 @@ func (n *Node) RunLeader() {
 			case <-stepDownCh:
 				return
 			case <-heartBeatCh:
+				n.mu.Lock()
 				for key := range n.peers {
 					p := n.peers[key]
 
@@ -265,25 +263,78 @@ func (n *Node) RunLeader() {
 						CommitIndex:  n.commitIndex,
 						Entries:      nil,
 					}
+					n.mu.Unlock()
 
 					deadlineTimeout := timeout / 2
 
 					reply, err := p.AppendEntriesToPeer(&msg, deadlineTimeout)
 					if err != nil {
 						slog.Error(err.Error())
+						n.mu.Lock()
 						continue
 					}
 
 					slog.Info("response: ", "success", reply.Success, "term", reply.Term)
 
+					n.mu.Lock()
 					if reply.Success == false && reply.Term > n.currentTerm {
 						// step down
+						n.currentTerm = reply.Term
 						n.role = FOLLOWER
+						n.mu.Unlock()
 						return
 					}
 				}
-			case <-n.newEntryCh:
+				n.mu.Unlock()
+			case entry := <-n.newEntryCh:
+				// Append entry to leader's log
+				n.mu.Lock()
+				n.log = append(n.log, entry)
+				n.SavePersistentState()
+				slog.Info("Leader appended new entry", "command", entry.command, "term", entry.term)
 
+				// Replicate to all followers
+				for key := range n.peers {
+					p := n.peers[key]
+
+					// Send AppendEntries with the new entry
+					prevLogIndex := int32(len(n.log) - 2)
+					prevLogTerm := n.log[prevLogIndex].term
+
+					msg := AppendEntriesMessage{
+						Term:         n.currentTerm,
+						LeaderId:     n.nodeId,
+						PrevLogIndex: prevLogIndex,
+						PrevLogTerm:  prevLogTerm,
+						CommitIndex:  n.commitIndex,
+						Entries: []*LogEntryMessage{{
+							Term:    entry.term,
+							Command: entry.command,
+						}},
+					}
+					n.mu.Unlock()
+
+					deadlineTimeout := timeout / 2
+
+					reply, err := p.AppendEntriesToPeer(&msg, deadlineTimeout)
+					if err != nil {
+						slog.Error("Failed to replicate to peer", "error", err)
+						n.mu.Lock()
+						continue
+					}
+
+					n.mu.Lock()
+					if reply.Success {
+						slog.Info("Successfully replicated to peer", "peer", p.id)
+					} else if reply.Term > n.currentTerm {
+						// step down
+						n.currentTerm = reply.Term
+						n.role = FOLLOWER
+						n.mu.Unlock()
+						return
+					}
+				}
+				n.mu.Unlock()
 			}
 		}
 	}()

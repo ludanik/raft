@@ -28,28 +28,18 @@ func (n *Node) RequestVote(ctx context.Context, msg *RequestVoteMessage) (*Reque
 	sameTerm := msg.Term == n.currentTerm
 	validVote := (n.votedFor == msg.CandidateId) || (n.votedFor == -1)
 
-	var lastLogTerm int32
-	var lastLogIdx int32
-	// this isn't right
-	// but i will leave it here for now bcoz i wanna test election
-	// TODO: do this more intelligently
-	if len(n.log) == 0 {
-		lastLogTerm = 0
-		lastLogIdx = 0
-	} else {
-		lastLogTerm = n.log[len(n.log)-1].term
-		lastLogIdx = int32(len(n.log) - 1)
-	}
+	// Get last log entry's term and index
+	lastLogIdx := int32(len(n.log) - 1)
+	lastLogTerm := n.log[lastLogIdx].term
 
 	// "candidate's log is at least as complete as local log"
-	// what does this mean?
-	// candidateLogTerm >= serverLogTerm
-	// candidateLogIdx >= serverLogIdx
-	// this is probably wrong though
-	validLogTerm := msg.LastLogTerm >= lastLogTerm
-	validLogIdx := msg.LastLogIndex >= lastLogIdx
+	// According to Raft: candidate's log is up-to-date if:
+	// - last log term is greater, OR
+	// - last log terms are equal AND last log index is greater or equal
+	logIsUpToDate := (msg.LastLogTerm > lastLogTerm) || 
+		(msg.LastLogTerm == lastLogTerm && msg.LastLogIndex >= lastLogIdx)
 
-	if sameTerm && validVote && validLogIdx && validLogTerm {
+	if sameTerm && validVote && logIsUpToDate {
 		n.resetTimeoutCh <- true
 		n.votedFor = msg.CandidateId
 		n.SavePersistentState()
@@ -78,7 +68,11 @@ func (n *Node) AppendEntries(ctx context.Context, msg *AppendEntriesMessage) (*A
 		}, nil
 	}
 
-	if n.log[msg.PrevLogIndex].term != msg.PrevLogTerm {
+	// Update leader node ID
+	n.leaderNodeId = msg.LeaderId
+
+	// Check if log contains an entry at prevLogIndex with matching term
+	if int(msg.PrevLogIndex) >= len(n.log) || n.log[msg.PrevLogIndex].term != msg.PrevLogTerm {
 		return &AppendEntriesReply{
 			Term:    msg.Term,
 			Success: false,
@@ -97,10 +91,35 @@ func (n *Node) AppendEntries(ctx context.Context, msg *AppendEntriesMessage) (*A
 	}
 
 	// append entries
-
+	// If an existing entry conflicts with a new one (same index but different terms),
+	// delete the existing entry and all that follow it
 	for idx, entry := range msg.Entries {
-
+		logIdx := int(msg.PrevLogIndex) + 1 + idx
+		
+		// if log doesn't have entry at this index, append it
+		if logIdx >= len(n.log) {
+			n.log = append(n.log, LogEntry{term: entry.Term, command: entry.Command})
+		} else if n.log[logIdx].term != entry.Term {
+			// conflict: delete existing entry and all that follow
+			n.log = n.log[:logIdx]
+			n.log = append(n.log, LogEntry{term: entry.Term, command: entry.Command})
+		}
+		// else: entry matches, continue
 	}
+
+	// update commit index
+	if msg.CommitIndex > n.commitIndex {
+		// commitIndex should be min(leaderCommit, index of last new entry)
+		lastNewEntryIdx := int32(len(n.log) - 1)
+		if msg.CommitIndex < lastNewEntryIdx {
+			n.commitIndex = msg.CommitIndex
+		} else {
+			n.commitIndex = lastNewEntryIdx
+		}
+	}
+
+	// save state after modifying log
+	n.SavePersistentState()
 
 	return &AppendEntriesReply{
 		Term:    msg.Term,

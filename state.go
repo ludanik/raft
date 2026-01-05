@@ -17,7 +17,8 @@ func (n *Node) LoadPersistentState() error {
 		// probably because it doesnt exist
 		// return empty persistentState and
 		// and save it when u save log
-		entries := make([]LogEntry, 0)
+		// Initialize with sentinel entry at index 0
+		entries := []LogEntry{{term: 0, command: ""}}
 
 		n.log = entries
 		n.currentTerm = 0
@@ -43,7 +44,9 @@ func (n *Node) LoadPersistentState() error {
 	}
 
 	fmt.Println("currTerm votedFor", currentTerm, votedFor)
-	entries := make([]LogEntry, len(lines)-1)
+	
+	// Initialize with sentinel entry at index 0 if no log entries
+	entries := []LogEntry{{term: 0, command: ""}}
 
 	for idx := 1; idx < len(lines); idx++ {
 		if (len(lines[idx]) < 1) || (lines[idx] == "") {
@@ -57,7 +60,7 @@ func (n *Node) LoadPersistentState() error {
 		}
 
 		entry := LogEntry{int32(term), splitLine[1]}
-		entries[idx-1] = entry
+		entries = append(entries, entry)
 	}
 
 	n.log = entries
@@ -85,7 +88,9 @@ func (n *Node) SavePersistentState() error {
 
 	log := n.log
 	var str string
-	for idx, entry := range log {
+	// Skip sentinel entry at index 0 when saving
+	for idx := 1; idx < len(log); idx++ {
+		entry := log[idx]
 		if idx == len(log)-1 {
 			str = fmt.Sprintf("%d,%s", entry.term, entry.command)
 		} else {
